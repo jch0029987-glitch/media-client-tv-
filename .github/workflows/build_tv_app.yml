@@ -1,0 +1,67 @@
+name: Build TV App APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_release:
+        description: 'Build signed release APK?'
+        required: true
+        type: boolean
+        default: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Java JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.x'
+          channel: 'stable'
+          cache: true
+
+      - name: Install Dependencies
+        run: flutter pub get
+
+      - name: Prepare Keystore and Signing Properties
+        if: ${{ inputs.build_release == true }}
+        env:
+          KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        run: |
+          # 1. Decode the base64 keystore string back into a binary .jks file
+          echo "$KEYSTORE_BASE64" | base64 --decode > android/app/release.jks
+          
+          # 2. Automatically write the key.properties file that Gradle expects for signing
+          cat <<EOF > android/key.properties
+          storePassword=$STORE_PASSWORD
+          keyPassword=$KEY_PASSWORD
+          keyAlias=$KEY_ALIAS
+          storeFile=release.jks
+          EOF
+
+      - name: Build APK
+        run: |
+          if [ "${{ inputs.build_release }}" == "true" ]; then
+            flutter build apk --release
+          else
+            flutter build apk --debug
+          fi
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: media-client-tv-binary
+          path: build/app/outputs/flutter-apk/
+          retention-days: 7
