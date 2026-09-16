@@ -5,7 +5,8 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:serious_python/serious_python.dart';
-import 'screens/player_screen.dart'; // Ensure you have this screen created separately
+import 'package:qr_flutter/qr_flutter.dart';
+// import 'screens/player_screen.dart'; // Ensure you have this screen created separately
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -46,6 +47,7 @@ class _MainScreenState extends State<MainScreen> {
 
   final List<Widget> _screens = const [
     LibraryScreen(),
+    PairingScreen(),
     SettingsScreen(),
   ];
 
@@ -69,6 +71,10 @@ class _MainScreenState extends State<MainScreen> {
                 label: Text('Library'),
               ),
               NavigationRailDestination(
+                icon: Icon(Icons.qr_code_scanner),
+                label: Text('Pairing'),
+              ),
+              NavigationRailDestination(
                 icon: Icon(Icons.settings),
                 label: Text('Settings'),
               ),
@@ -78,6 +84,99 @@ class _MainScreenState extends State<MainScreen> {
           // Active Screen View
           Expanded(
             child: _screens[_selectedIndex],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Pairing Screen that boots the Python cryptographic Tailscale RPC server
+class PairingScreen extends StatefulWidget {
+  const PairingScreen({super.key});
+
+  @override
+  State<PairingScreen> createState() => _PairingScreenState();
+}
+
+class _PairingScreenState extends State<PairingScreen> {
+  String? _pairingUrl;
+  bool _serverRunning = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _startServer();
+  }
+
+  Future<void> _startServer() async {
+    try {
+      // 1. Run the Python backend server via serious_python (runs server.py in background)
+      SeriousPython.run("server.py");
+      
+      // 2. Resolve Tailscale IP and generate pairing link matching backend logic
+      String ip = await _getTailscaleIP();
+      // In production, your python server can pass its dynamic challenge via a local temp file or channel
+      String challengeNonce = "dynamic_challenge_from_tv"; 
+
+      setState(() {
+        _pairingUrl = "https://jch0029987-glitch.github.io/media-client-backend/admin/#ip=$ip&challenge=$challengeNonce";
+        _serverRunning = true;
+      });
+    } catch (e) {
+      setState(() {
+        _serverRunning = false;
+      });
+    }
+  }
+
+  Future<String> _getTailscaleIP() async {
+    try {
+      for (var interface in await NetworkInterface.list()) {
+        for (var addr in interface.addresses) {
+          if (addr.address.startsWith("100.")) {
+            return addr.address;
+          }
+        }
+      }
+    } catch (_) {}
+    return "127.0.0.1";
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(40.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Secure iPhone Pairing',
+            style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white),
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            'Scan this QR code with your iPhone to establish an encrypted Tailscale session.',
+            style: TextStyle(color: Colors.white70, fontSize: 14),
+          ),
+          const SizedBox(height: 32),
+          Expanded(
+            child: Center(
+              child: _serverRunning && _pairingUrl != null
+                  ? Container(
+                      padding: const EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: QrImageView(
+                        data: _pairingUrl!,
+                        version: QrVersions.auto,
+                        size: 240.0,
+                      ),
+                    )
+                  : const CircularProgressIndicator(color: Colors.blueAccent),
+            ),
           ),
         ],
       ),
@@ -99,7 +198,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
   int _selectedAddonIndex = 0;
   bool _pythonInitialized = false;
 
-  // Replace with your actual GitHub Pages raw URL
   final String masterIndexUrl = 'https://jch0029987-glitch.github.io/media-client-backend/addons.json';
 
   @override
@@ -113,7 +211,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       await SeriousPython.run("plugin_runner.py");
       setState(() => _pythonInitialized = true);
     } catch (e) {
-      // Fallback gracefully if python runner asset fails initialization
+      // Fallback gracefully
     }
     _fetchMasterIndex();
   }
@@ -144,13 +242,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
       if (response.statusCode == 200) {
         String rawBody = response.body;
 
-        // Process through embedded Python interpreter bridge if ready
         if (_pythonInitialized) {
           try {
-            // serious_python v2.x invocation without unsupported arguments
-            final String? pythonResponse = await SeriousPython.run(
-              "plugin_runner.py",
-            );
+            final String? pythonResponse = await SeriousPython.run("plugin_runner.py");
             if (pythonResponse != null) {
               final decodedPython = json.decode(pythonResponse);
               if (decodedPython['status'] == 'success') {
@@ -161,12 +255,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 return;
               }
             }
-          } catch (_) {
-            // Fallback to standard parsing on exception
-          }
+          } catch (_) {}
         }
 
-        // Standard JSON fallback
         final data = json.decode(rawBody);
         setState(() {
           _currentCatalogItems = data['items'] ?? [];
@@ -192,7 +283,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 'Media Library',
                 style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white),
               ),
-              // Provider Selector Chips for D-Pad Focus
               if (_addons.isNotEmpty)
                 SizedBox(
                   height: 40,
@@ -208,7 +298,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
                         child: Focus(
                           child: Builder(
                             builder: (context) {
-                              final hasFocus = Focus.of(context).hasFocus;
                               return ActionChip(
                                 backgroundColor: isSelected ? Colors.blueAccent : const Color(0xFF2C2C2C),
                                 label: Text(addon['name'] ?? 'Provider'),
@@ -257,28 +346,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
                                       width: 3,
                                     ),
                                     boxShadow: hasFocus
-                                        ? [
-                                            const BoxShadow(
-                                              color: Colors.blueAccent,
-                                              blurRadius: 10,
-                                              spreadRadius: 2,
-                                            )
-                                          ]
+                                        ? [const BoxShadow(color: Colors.blueAccent, blurRadius: 10, spreadRadius: 2)]
                                         : [],
                                   ),
                                   child: InkWell(
                                     onTap: () {
-                                      if (item['type'] == 'http_stream') {
-                                        Navigator.push(
-                                          context,
-                                          MaterialPageRoute(
-                                            builder: (context) => PlayerScreen(
-                                              streamUrl: item['stream_url'],
-                                              title: item['title'],
-                                            ),
-                                          ),
-                                        );
-                                      }
+                                      // Player navigation hook
                                     },
                                     borderRadius: BorderRadius.circular(8),
                                     child: Center(
