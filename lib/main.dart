@@ -120,8 +120,8 @@ class _MeshServerScreenState extends State<MeshServerScreen> {
     });
 
     try {
-      // Run server script from bundled asset path (matching python_app structure)
-      await SeriousPython.run("python_app/server.py");
+      // Run server script using appFileName since package flattens python_app root
+      await SeriousPython.run(appFileName: "server.py");
       
       // Give the server a brief moment to bind to socket port 9090
       await Future.delayed(const Duration(seconds: 5));
@@ -267,7 +267,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   Future<void> _initPythonAndFetch() async {
     try {
-      await SeriousPython.run("python_app/plugin_runner.py");
+      await SeriousPython.run(appFileName: "plugin_runner.py");
       setState(() => _pythonInitialized = true);
     } catch (e) {
       // Fallback gracefully
@@ -307,7 +307,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
         if (_pythonInitialized) {
           try {
-            final String? pythonResponse = await SeriousPython.run("python_app/plugin_runner.py");
+            final String? pythonResponse = await SeriousPython.run(appFileName: "plugin_runner.py");
             if (_activeCatalogUrl != catalogUrl) return; // Guard check
             
             if (pythonResponse != null) {
@@ -467,7 +467,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     try {
       const owner = 'jch0029987-glitch';
-      const repo = 'media-client-tv';
+      const repo = 'media-client-tv-';
       final url = Uri.parse('https://api.github.com/repos/$owner/$repo/releases/latest');
       
       final response = await http.get(url, headers: {'Accept': 'application/vnd.github.v3+json'});
