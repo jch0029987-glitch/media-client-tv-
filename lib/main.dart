@@ -120,8 +120,8 @@ class _MeshServerScreenState extends State<MeshServerScreen> {
     });
 
     try {
-      // Fixed: Pass script name positionally
-      await SeriousPython.run("server.py");
+      // Correct API: Call run() with appFileName parameter instead of passing path arguments
+      await SeriousPython.run(appFileName: "server.py");
       
       // Give the server a brief moment to bind to socket port 9090
       await Future.delayed(const Duration(seconds: 5));
@@ -267,8 +267,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   Future<void> _initPythonAndFetch() async {
     try {
-      // Fixed: Pass script name positionally
-      await SeriousPython.run("plugin_runner.py");
+      await SeriousPython.run(appFileName: "plugin_runner.py");
       setState(() => _pythonInitialized = true);
     } catch (e) {
       // Fallback gracefully
@@ -308,8 +307,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
         if (_pythonInitialized) {
           try {
-            // Fixed: Pass script name positionally
-            final String? pythonResponse = await SeriousPython.run("plugin_runner.py");
+            final String? pythonResponse = await SeriousPython.run(appFileName: "plugin_runner.py");
             if (_activeCatalogUrl != catalogUrl) return; // Guard check
             
             if (pythonResponse != null) {
