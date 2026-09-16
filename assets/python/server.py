@@ -1,6 +1,7 @@
 import socket
 import json
 import secrets
+import os
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import qrcode
 
@@ -67,7 +68,6 @@ class SecureRPCHandler(BaseHTTPRequestHandler):
             elif method == "Player.Open":
                 item = params.get("item", {})
                 print(f"[Tailscale RPC] Playing stream on TV: {params.get('options', {}).get('title')} -> {item.get('file')}")
-                # Handoff stream_url to your Flutter TV player controller here
                 result = {"status": "OK"}
             else:
                 error = {"code": -32601, "message": f"Method not found: {method}"}
@@ -90,9 +90,19 @@ def start_secure_server():
     challenge_nonce = secrets.token_hex(16)
     active_challenges['current'] = challenge_nonce
     
+    # Save state for Flutter frontend to read
+    os.makedirs("shared", exist_ok=True)
+    state_data = {
+        "ip": tv_ip,
+        "port": port,
+        "challenge": challenge_nonce
+    }
+    with open("shared/pairing_state.json", "w") as f:
+        json.dump(state_data, f)
+    
     pairing_url = f"https://YOUR_GITHUB_USERNAME.github.io/media-client-backend/admin/#ip={tv_ip}&challenge={challenge_nonce}"
     
-    print(f"\n[Secure Pairing] Scan this QR code with your iPhone to pair securely:")
+    print(f"\n[Secure Pairing] Scan this QR code with your phone to pair securely:")
     qr = qrcode.QRCode()
     qr.add_data(pairing_url)
     qr.make(fit=True)
