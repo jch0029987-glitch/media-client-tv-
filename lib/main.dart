@@ -143,7 +143,7 @@ class _PairingScreenState extends State<PairingScreen> {
       }
 
       setState(() {
-        _pairingUrl = "https://YOUR_GITHUB_USERNAME.github.io/media-client-backend/admin/#ip=$ip&challenge=$challengeNonce";
+        _pairingUrl = "https://jch0029987-glitch.github.io/media-client-backend/admin/#ip=$ip&challenge=$challengeNonce";
         _serverRunning = true;
       });
     } catch (e) {
