@@ -1,12 +1,11 @@
 import 'dart:io';
-import 'dart:json';
+import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:serious_python/serious_python.dart';
-import 'screens/player_screen.dart'; // Ensure you have this screen created separately
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
