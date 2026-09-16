@@ -6,10 +6,14 @@ on:
 jobs:
   regen:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # Required to push commits back to the repo
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          persist-credentials: true
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -69,5 +73,17 @@ jobs:
           if [ -f "/tmp/android_backup/key.properties" ]; then
             cp /tmp/android_backup/key.properties android/app/key.properties
           fi
+
+      - name: Commit and Push Changes
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
           
-          echo "Scaffold regeneration and restoration completed successfully!"
+          git add android/
+          
+          if git diff --staged --quiet; then
+            echo "No changes detected."
+          else
+            git commit -m "chore: regenerate clean android scaffold and restore custom configs"
+            git push origin HEAD:${{ github.ref_name }}
+          fi
