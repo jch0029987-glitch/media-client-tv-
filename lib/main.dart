@@ -1,13 +1,16 @@
+import 'dart:io';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'services/storage_service.dart';
+import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
 
 void main() {
-  runApp(const MediaClientTvApp());
+  runApp(const MediaClientApp());
 }
 
-class MediaClientTvApp extends StatelessWidget {
-  const MediaClientTvApp({super.key});
+class MediaClientApp extends StatelessWidget {
+  const MediaClientApp({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -16,28 +19,31 @@ class MediaClientTvApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         brightness: Brightness.dark,
-        scaffoldBackgroundColor: const Color(0xFF0F0F0F),
         primarySwatch: Colors.blue,
+        scaffoldBackgroundColor: const Color(0xFF121212),
+        colorScheme: const ColorScheme.dark(
+          primary: Colors.blueAccent,
+          surface: Color(0xFF1E1E1E),
+        ),
       ),
-      home: const MainNavigatorScreen(),
+      home: const MainScreen(),
     );
   }
 }
 
-class MainNavigatorScreen extends StatefulWidget {
-  const MainNavigatorScreen({super.key});
+class MainScreen extends StatefulWidget {
+  const MainScreen({super.key});
 
   @override
-  State<MainNavigatorScreen> createState() => _MainNavigatorScreenState();
+  State<MainScreen> createState() => _MainScreenState();
 }
 
-class _MainNavigatorScreenState extends State<MainNavigatorScreen> {
+class _MainScreenState extends State<MainScreen> {
   int _selectedIndex = 0;
 
-  final List<Widget> _screens = [
-    const BrowseScreen(),
-    const CustomSourceScreen(),
-    const SettingsScreen(),
+  final List<Widget> _screens = const [
+    LibraryScreen(),
+    SettingsScreen(),
   ];
 
   @override
@@ -45,7 +51,7 @@ class _MainNavigatorScreenState extends State<MainNavigatorScreen> {
     return Scaffold(
       body: Row(
         children: [
-          // D-Pad Friendly Side Navigation Rail
+          // Android TV Navigation Sidebar
           NavigationRail(
             selectedIndex: _selectedIndex,
             onDestinationSelected: (int index) {
@@ -54,15 +60,10 @@ class _MainNavigatorScreenState extends State<MainNavigatorScreen> {
               });
             },
             labelType: NavigationRailLabelType.all,
-            backgroundColor: const Color(0xFF161616),
             destinations: const [
               NavigationRailDestination(
-                icon: Icon(Icons.home),
-                label: Text('Browse'),
-              ),
-              NavigationRailDestination(
-                icon: Icon(Icons.link),
-                label: Text('Custom Source'),
+                icon: Icon(Icons.video_library),
+                label: Text('Library'),
               ),
               NavigationRailDestination(
                 icon: Icon(Icons.settings),
@@ -71,8 +72,7 @@ class _MainNavigatorScreenState extends State<MainNavigatorScreen> {
             ],
           ),
           const VerticalDivider(thickness: 1, width: 1, color: Colors.white24),
-          
-          // Active Screen Content
+          // Active Screen View
           Expanded(
             child: _screens[_selectedIndex],
           ),
@@ -82,59 +82,63 @@ class _MainNavigatorScreenState extends State<MainNavigatorScreen> {
   }
 }
 
-/// 1. Browse Screen (Media Grid)
-class BrowseScreen extends StatefulWidget {
-  const BrowseScreen({super.key});
-
-  @override
-  State<BrowseScreen> createState() => _BrowseScreenState();
-}
-
-class _BrowseScreenState extends State<BrowseScreen> {
-  final FocusNode _firstCardFocusNode = FocusNode();
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _firstCardFocusNode.requestFocus();
-    });
-  }
-
-  @override
-  void dispose() {
-    _firstCardFocusNode.dispose();
-    super.dispose();
-  }
+class LibraryScreen extends StatelessWidget {
+  const LibraryScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.all(32.0),
+      padding: const EdgeInsets.all(40.0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'Media Stream Library',
+            'Media Library',
             style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white),
           ),
           const SizedBox(height: 24),
           Expanded(
             child: GridView.builder(
-              itemCount: 8,
               gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 4,
-                crossAxisSpacing: 16,
-                mainAxisSpacing: 16,
+                crossAxisCount: 3,
+                crossAxisSpacing: 20,
+                mainAxisSpacing: 20,
                 childAspectRatio: 16 / 9,
               ),
+              itemCount: 6,
               itemBuilder: (context, index) {
-                return FocusableCard(
-                  focusNode: index == 0 ? _firstCardFocusNode : null,
-                  title: 'Stream Item ${index + 1}',
-                  onSelected: () {
-                    // TODO: Trigger playback intent via local loopback proxy
-                  },
+                return Focus(
+                  child: Builder(
+                    builder: (context) {
+                      final hasFocus = Focus.of(context).hasFocus;
+                      return AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF2C2C2C),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: hasFocus ? Colors.blueAccent : Colors.transparent,
+                            width: 3,
+                          ),
+                          boxShadow: hasFocus
+                              ? [
+                                  const BoxShadow(
+                                    color: Colors.blueAccent,
+                                    blurRadius: 10,
+                                    spreadRadius: 2,
+                                  )
+                                ]
+                              : [],
+                        ),
+                        child: Center(
+                          child: Text(
+                            'Media Item ${index + 1}',
+                            style: const TextStyle(fontSize: 16, color: Colors.white),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
                 );
               },
             ),
@@ -145,43 +149,94 @@ class _BrowseScreenState extends State<BrowseScreen> {
   }
 }
 
-/// 2. Custom Source Screen (BYOS Configuration backed by StorageService)
-class CustomSourceScreen extends StatefulWidget {
-  const CustomSourceScreen({super.key});
+class SettingsScreen extends StatefulWidget {
+  const SettingsScreen({super.key});
 
   @override
-  State<CustomSourceScreen> createState() => _CustomSourceScreenState();
+  State<SettingsScreen> createState() => _SettingsScreenState();
 }
 
-class _CustomSourceScreenState extends State<CustomSourceScreen> {
-  final TextEditingController _urlController = TextEditingController();
+class _SettingsScreenState extends State<SettingsScreen> {
+  bool _checking = false;
+  String _statusMessage = 'System up to date.';
+  static const MethodChannel _platform = MethodChannel('com.example.media_client_tv/installer');
 
-  @override
-  void initState() {
-    super.initState();
-    _loadStoredUrl();
-  }
-
-  Future<void> _loadStoredUrl() async {
-    final url = await StorageService.loadEndpoint();
+  Future<void> _handleCheckForUpdate() async {
     setState(() {
-      _urlController.text = url;
+      _checking = true;
+      _statusMessage = 'Checking for updates...';
     });
-  }
 
-  Future<void> _saveStoredUrl() async {
-    await StorageService.saveEndpoint(_urlController.text);
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Source configuration saved locally.')),
-      );
+    try {
+      // TODO: Replace with your actual GitHub username and repository name
+      const owner = 'YOUR_GITHUB_USERNAME';
+      const repo = 'media-client-tv';
+      final url = Uri.parse('https://api.github.com/repos/$owner/$repo/releases/latest');
+      
+      final response = await http.get(url, headers: {'Accept': 'application/vnd.github.v3+json'});
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        String latestTag = data['tag_name'] ?? '';
+        
+        const currentVersion = 'v1.0.0-1'; // Match against your release tag schema
+        if (latestTag != currentVersion) {
+          final assets = data['assets'] as List;
+          final apkAsset = assets.firstWhere(
+            (asset) => asset['name'].toString().endsWith('.apk'),
+            orElse: () => null,
+          );
+
+          if (apkAsset != null) {
+            setState(() => _statusMessage = 'New version $latestTag found. Downloading...');
+            await _downloadAndInstall(apkAsset['browser_download_url']);
+            return;
+          }
+        }
+        setState(() => _statusMessage = 'You are running the latest version ($currentVersion).');
+      } else {
+        setState(() => _statusMessage = 'No release updates found on GitHub.');
+      }
+    } catch (e) {
+      setState(() => _statusMessage = 'Update check failed: $e');
+    } finally {
+      setState(() => _checking = false);
     }
   }
 
-  @override
-  void dispose() {
-    _urlController.dispose();
-    super.dispose();
+  Future<void> _downloadAndInstall(String apkUrl) async {
+    try {
+      final client = http.Client();
+      final request = http.Request('GET', Uri.parse(apkUrl));
+      final response = await client.send(request);
+
+      final contentLength = response.contentLength ?? 0;
+      int downloaded = 0;
+
+      final dir = await getTemporaryDirectory();
+      final filePath = '${dir.path}/update.apk';
+      final file = File(filePath);
+      final sink = file.openWrite();
+
+      await response.stream.forEach((chunk) {
+        sink.add(chunk);
+        downloaded += chunk.length;
+        if (contentLength > 0) {
+          setState(() {
+            _statusMessage = 'Downloading: ${(downloaded / contentLength * 100).toStringAsFixed(0)}%';
+          });
+        }
+      });
+
+      await sink.flush();
+      await sink.close();
+      client.close();
+
+      // Trigger native Android installer package intent via method channel
+      await _platform.invokeMethod('installApk', {'path': filePath});
+    } catch (e) {
+      setState(() => _statusMessage = 'Download/Install failed: $e');
+    }
   }
 
   @override
@@ -192,120 +247,21 @@ class _CustomSourceScreenState extends State<CustomSourceScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'Bring Your Own Source (BYOS)',
+            'Settings & System',
             style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white),
           ),
-          const SizedBox(height: 12),
-          const Text(
-            'Enter your custom API endpoint, manifest URL, or extension repository source below.',
-            style: TextStyle(fontSize: 16, color: Colors.white70),
-          ),
           const SizedBox(height: 32),
-          TextField(
-            controller: _urlController,
-            style: const TextStyle(color: Colors.white),
-            decoration: InputDecoration(
-              labelText: 'Source URL / Endpoint',
-              labelStyle: const TextStyle(color: Colors.white70),
-              filled: true,
-              fillColor: Colors.white12,
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-              focusedBorder: const OutlineInputBorder(
-                borderSide: BorderSide(color: Colors.blue, width: 2),
-              ),
-            ),
-          ),
-          const SizedBox(height: 20),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.blue.shade700,
               padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
             ),
-            onPressed: _saveStoredUrl,
-            child: const Text('Save Configuration', style: TextStyle(fontSize: 16)),
+            onPressed: _checking ? null : _handleCheckForUpdate,
+            child: Text(_checking ? 'Checking...' : 'Check for App Updates', style: const TextStyle(fontSize: 16)),
           ),
+          const SizedBox(height: 16),
+          Text(_statusMessage, style: const TextStyle(color: Colors.white70, fontSize: 14)),
         ],
-      ),
-    );
-  }
-}
-
-/// 3. Settings Screen Placeholder
-class SettingsScreen extends StatelessWidget {
-  const SettingsScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return const Padding(
-      padding: EdgeInsets.all(40.0),
-      child: Text(
-        'Settings',
-        style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white),
-      ),
-    );
-  }
-}
-
-/// Reusable focus-reactive Card for TV D-pad navigation
-class FocusableCard extends StatefulWidget {
-  final FocusNode? focusNode;
-  final String title;
-  final VoidCallback onSelected;
-
-  const FocusableCard({
-    super.key,
-    this.focusNode,
-    required this.title,
-    required this.onSelected,
-  });
-
-  @override
-  State<FocusableCard> createState() => _FocusableCardState();
-}
-
-class _FocusableCardState extends State<FocusableCard> {
-  bool _isFocused = false;
-
-  @override
-  Widget build(BuildContext context) {
-    return Focus(
-      focusNode: widget.focusNode,
-      onFocusChange: (hasFocus) => setState(() => _isFocused = hasFocus),
-      onKey: (node, event) {
-        if (event is KeyDownEvent &&
-            (event.logicalKey == LogicalKeyboardKey.select ||
-             event.logicalKey == LogicalKeyboardKey.enter)) {
-          widget.onSelected();
-          return KeyEventResult.handled;
-        }
-        return KeyEventResult.ignored;
-      },
-      child: GestureDetector(
-        onTap: widget.onSelected,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
-          decoration: BoxDecoration(
-            color: _isFocused ? Colors.blue.shade800 : Colors.white10,
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(
-              color: _isFocused ? Colors.white : Colors.transparent,
-              width: 3,
-            ),
-            boxShadow: _isFocused
-                ? [BoxShadow(color: Colors.blue.withOpacity(0.4), blurRadius: 10, spreadRadius: 2)]
-                : [],
-          ),
-          child: Center(
-            child: Text(
-              widget.title,
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 16,
-                fontWeight: _isFocused ? FontWeight.bold : FontWeight.normal,
-              ),
-            ),
-          ),
-        ),
       ),
     );
   }
