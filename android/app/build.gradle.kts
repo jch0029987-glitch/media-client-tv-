@@ -30,6 +30,13 @@ android {
         versionName = flutter.versionName
     }
 
+    // Required for serious_python to extract and load native .so files properly
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
+
     signingConfigs {
         create("release") {
             if (keystorePropertiesFile.exists()) {
