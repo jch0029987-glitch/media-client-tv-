@@ -57,9 +57,14 @@ jobs:
         env:
           SERIOUS_PYTHON_SITE_PACKAGES: ${{ github.workspace }}/build/site-packages
         run: |
-          # Create site-packages directory required by serious_python gradle task
+          # 1. Create site-packages directory required by serious_python gradle task
           mkdir -p $SERIOUS_PYTHON_SITE_PACKAGES
           
+          # 2. Force compileSdk to 36 and targetSdk to 34
+          echo "flutter.compileSdkVersion=36" >> android/local.properties
+          echo "flutter.targetSdkVersion=34" >> android/local.properties
+          
+          # 3. Build release or debug split APKs
           if [ "${{ inputs.build_release }}" == "true" ]; then
             flutter build apk --release --split-per-abi
           else
