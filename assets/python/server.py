@@ -1,11 +1,14 @@
 import socket
 import json
 import secrets
+import hashlib
 import os
 from http.server import HTTPServer, BaseHTTPRequestHandler
-import qrcode
 
-active_challenges = {}
+# Generate a random temporary password on boot (e.g., 6 uppercase chars/numbers)
+DYNAMIC_PASSWORD = secrets.token_hex(3).upper()
+STORED_PASSWORD_HASH = hashlib.sha256(DYNAMIC_PASSWORD.encode('utf-8')).hexdigest()
+
 valid_device_tokens = set()
 
 def get_tailscale_ip():
@@ -26,6 +29,9 @@ class SecureRPCHandler(BaseHTTPRequestHandler):
             self.end_headers()
             return
 
+        client_ip = self.client_address[0]
+        is_tailscale_client = client_ip.startswith("100.")
+
         content_length = int(self.headers.get('Content-Length', 0))
         body = self.rfile.read(content_length)
         
@@ -43,21 +49,21 @@ class SecureRPCHandler(BaseHTTPRequestHandler):
         result = None
         error = None
 
-        if method == "System.VerifyPairing":
-            challenge = params.get("challenge")
-            if challenge in active_challenges.values():
+        if method == "System.VerifyPassword":
+            client_hash = params.get("password_hash")
+            if client_hash == STORED_PASSWORD_HASH:
                 device_token = secrets.token_hex(32)
                 valid_device_tokens.add(device_token)
-                active_challenges.clear()
                 result = {"device_token": device_token}
             else:
-                error = {"code": -32603, "message": "Invalid or expired cryptographic challenge."}
+                error = {"code": -401, "message": "Incorrect password."}
         else:
             auth_token = self.headers.get("X-Device-Token") or params.get("device_token")
+            
             if auth_token not in valid_device_tokens:
                 self.send_response(401)
                 self.end_headers()
-                self.wfile.write(json.dumps({"error": "Unauthorized: Invalid or missing device token."}).encode('utf-8'))
+                self.wfile.write(json.dumps({"error": "Unauthorized: Active session required."}).encode('utf-8'))
                 return
 
             if method == "VideoLibrary.GetMovies":
@@ -87,29 +93,17 @@ def start_secure_server():
     tv_ip = get_tailscale_ip()
     port = 9090
     
-    challenge_nonce = secrets.token_hex(16)
-    active_challenges['current'] = challenge_nonce
+    print(f"\n==========================================")
+    print(f"  TV SECURE STARTUP PASSWORD: {DYNAMIC_PASSWORD}")
+    print(f"==========================================\n")
     
-    # Save state for Flutter frontend to read
+    # Optionally save the IP and state so a local UI or QR can use it if needed
     os.makedirs("shared", exist_ok=True)
-    state_data = {
-        "ip": tv_ip,
-        "port": port,
-        "challenge": challenge_nonce
-    }
     with open("shared/pairing_state.json", "w") as f:
-        json.dump(state_data, f)
-    
-    pairing_url = f"https://jch0029987-glitch.github.io/media-client-backend/admin/#ip={tv_ip}&challenge={challenge_nonce}"
-    
-    print(f"\n[Secure Pairing] Scan this QR code with your phone to pair securely:")
-    qr = qrcode.QRCode()
-    qr.add_data(pairing_url)
-    qr.make(fit=True)
-    qr.print_ascii()
-    
+        json.dump({"ip": tv_ip, "port": port}, f)
+
     server = HTTPServer(('0.0.0.0', port), SecureRPCHandler)
-    print(f"Secure RPC Server running on {tv_ip}:{port}...\n")
+    print(f"Server running on http://{tv_ip}:{port}...\n")
     server.serve_forever()
 
 if __name__ == '__main__':
