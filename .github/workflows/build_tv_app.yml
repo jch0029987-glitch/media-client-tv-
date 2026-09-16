@@ -53,12 +53,12 @@ jobs:
           storeFile=release.jks
           EOF
 
-      - name: Build APK
+      - name: Build APK (ABI Split for Chromecast HD)
         run: |
           if [ "${{ inputs.build_release }}" == "true" ]; then
-            flutter build apk --release
+            flutter build apk --release --split-per-abi
           else
-            flutter build apk --debug
+            flutter build apk --debug --split-per-abi
           fi
 
       - name: Upload APK Artifact
@@ -72,9 +72,9 @@ jobs:
         if: ${{ inputs.build_release == true }}
         uses: softprops/action-gh-release@v2
         with:
-          files: build/app/outputs/flutter-apk/app-release.apk
+          files: build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk
           tag_name: v1.0.0-${{ github.run_number }}
           name: "Media Client TV v1.0.0-${{ github.run_number }}"
-          body: "Automated signed release build for Android TV."
+          body: "Automated signed release build for Android TV (Chromecast HD optimized 32-bit armeabi-v7a)."
           draft: false
           prerelease: false
