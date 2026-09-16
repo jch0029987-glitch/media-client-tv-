@@ -120,8 +120,8 @@ class _MeshServerScreenState extends State<MeshServerScreen> {
     });
 
     try {
-      // Correct API: Call run() with appFileName parameter instead of passing path arguments
-      await SeriousPython.run(appFileName: "server.py");
+      // Fixed: Provide assetPath as required positional argument
+      await SeriousPython.run("app/app.zip", appFileName: "server.py");
       
       // Give the server a brief moment to bind to socket port 9090
       await Future.delayed(const Duration(seconds: 5));
@@ -267,7 +267,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   Future<void> _initPythonAndFetch() async {
     try {
-      await SeriousPython.run(appFileName: "plugin_runner.py");
+      // Fixed: Provide assetPath as required positional argument
+      await SeriousPython.run("app/app.zip", appFileName: "plugin_runner.py");
       setState(() => _pythonInitialized = true);
     } catch (e) {
       // Fallback gracefully
@@ -307,7 +308,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
         if (_pythonInitialized) {
           try {
-            final String? pythonResponse = await SeriousPython.run(appFileName: "plugin_runner.py");
+            // Fixed: Provide assetPath as required positional argument
+            final String? pythonResponse = await SeriousPython.run("app/app.zip", appFileName: "plugin_runner.py");
             if (_activeCatalogUrl != catalogUrl) return; // Guard check
             
             if (pythonResponse != null) {
