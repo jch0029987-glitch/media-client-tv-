@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'services/storage_service.dart';
 
 void main() {
   runApp(const MediaClientTvApp());
@@ -144,7 +145,7 @@ class _BrowseScreenState extends State<BrowseScreen> {
   }
 }
 
-/// 2. Custom Source Screen (BYOS Configuration)
+/// 2. Custom Source Screen (BYOS Configuration backed by StorageService)
 class CustomSourceScreen extends StatefulWidget {
   const CustomSourceScreen({super.key});
 
@@ -154,6 +155,34 @@ class CustomSourceScreen extends StatefulWidget {
 
 class _CustomSourceScreenState extends State<CustomSourceScreen> {
   final TextEditingController _urlController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _loadStoredUrl();
+  }
+
+  Future<void> _loadStoredUrl() async {
+    final url = await StorageService.loadEndpoint();
+    setState(() {
+      _urlController.text = url;
+    });
+  }
+
+  Future<void> _saveStoredUrl() async {
+    await StorageService.saveEndpoint(_urlController.text);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Source configuration saved locally.')),
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _urlController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -192,12 +221,7 @@ class _CustomSourceScreenState extends State<CustomSourceScreen> {
               backgroundColor: Colors.blue.shade700,
               padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
             ),
-            onPressed: () {
-              // TODO: Save custom source URL locally or pass to backend engine
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Source configuration saved.')),
-              );
-            },
+            onPressed: _saveStoredUrl,
             child: const Text('Save Configuration', style: TextStyle(fontSize: 16)),
           ),
         ],
