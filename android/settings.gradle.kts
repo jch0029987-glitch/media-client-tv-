@@ -1,35 +1,10 @@
-pluginManagement {
-    val flutterSdkPath = run {
-        val properties = java.util.Properties()
-        val file = file("local.properties")
-        if (file.exists()) {
-            properties.load(java.io.FileInputStream(file))
-        }
-        properties.getProperty("flutter.sdk") ?: error("flutter.sdk not set in local.properties")
-    }
-    includeBuild("$flutterSdkPath/packages/flutter_tools/gradle")
-    repositories {
-        google()
-        mavenCentral()
-        gradlePluginPortal()
-    }
-}
-
 plugins {
-    id("dev.flutter.plugin-loader") version "1.0.0"
-    id("com.android.application") version "7.3.0" apply false
+    id("dev.flutter.flutter-plugin-loader") version "1.0.0"
+    id("com.android.application") version "8.1.1" apply false
     id("org.jetbrains.kotlin.android") version "1.8.22" apply false
 }
 
 include(":app")
-
-dependencyResolutionManagement {
-    repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
-    repositories {
-        google()
-        mavenCentral()
-    }
-}
 
 val newBuildDir: Directory =
     rootProject.layout.buildDirectory
@@ -42,6 +17,7 @@ subprojects {
     project.layout.buildDirectory.value(newSubprojectBuildDir)
 }
 
+// Dynamically force all library subprojects (like serious_python_android) to SDK 36
 subprojects {
     afterEvaluate { project ->
         project.plugins.withId("com.android.library") {
@@ -54,7 +30,7 @@ subprojects {
                         setCompileSdkMethod.invoke(androidExt, 36)
                     }
                 } catch (e: Exception) {
-                    // Fallback via reflection if standard method signature differs
+                    // Fallback
                 }
             }
         }
