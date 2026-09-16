@@ -16,20 +16,21 @@ subprojects {
     project.layout.buildDirectory.value(newSubprojectBuildDir)
 }
 
-// Force all subproject libraries (like serious_python_android) to compile against SDK 36
+// Force all library subprojects (like serious_python_android) to compile against SDK 36 safely
 subprojects {
-    afterEvaluate { p ->
-        p.plugins.withId("com.android.library") {
-            p.extensions.findByName("android")?.let { androidExt ->
+    afterEvaluate { project: org.gradle.api.Project ->
+        project.pluginManager.withPlugin("com.android.library") {
+            val androidExt = project.extensions.findByName("android")
+            if (androidExt != null) {
                 try {
-                    val getMethod = androidExt.javaClass.getMethod("getCompileSdk")
-                    val setMethod = androidExt.javaClass.getMethod("setCompileSdk", Int::class.java)
+                    val getMethod = (androidExt as Any).javaClass.getMethod("getCompileSdk")
+                    val setMethod = (androidExt as Any).javaClass.getMethod("setCompileSdk", Int::class.java)
                     val currentSdk = getMethod.invoke(androidExt) as? Int
                     if (currentSdk == null || currentSdk < 36) {
                         setMethod.invoke(androidExt, 36)
                     }
                 } catch (e: Exception) {
-                    // Ignored if reflection fails
+                    // Fallback gracefully if method signatures differ
                 }
             }
         }
