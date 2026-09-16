@@ -100,7 +100,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
   bool _pythonInitialized = false;
 
   // Replace with your actual GitHub Pages raw URL
-  final String masterIndexUrl = 'https://YOUR_GITHUB_USERNAME.github.io/media-client-backend/addons.json';
+  final String masterIndexUrl = 'https://jch0029987-glitch.github.io/media-client-backend/addons.json';
 
   @override
   void initState() {
@@ -147,9 +147,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
         // Process through embedded Python interpreter bridge if ready
         if (_pythonInitialized) {
           try {
+            // serious_python v2.x invocation without unsupported arguments
             final String? pythonResponse = await SeriousPython.run(
               "plugin_runner.py",
-              args: [rawBody],
             );
             if (pythonResponse != null) {
               final decodedPython = json.decode(pythonResponse);
@@ -324,7 +324,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     });
 
     try {
-      const owner = 'YOUR_GITHUB_USERNAME';
+      const owner = 'jch0029987-glitch';
       const repo = 'media-client-tv';
       final url = Uri.parse('https://api.github.com/repos/$owner/$repo/releases/latest');
       
