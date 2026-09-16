@@ -54,7 +54,12 @@ jobs:
           EOF
 
       - name: Build APK (ABI Split for Chromecast HD)
+        env:
+          SERIOUS_PYTHON_SITE_PACKAGES: ${{ github.workspace }}/build/site-packages
         run: |
+          # Create site-packages directory required by serious_python gradle task
+          mkdir -p $SERIOUS_PYTHON_SITE_PACKAGES
+          
           if [ "${{ inputs.build_release }}" == "true" ]; then
             flutter build apk --release --split-per-abi
           else
