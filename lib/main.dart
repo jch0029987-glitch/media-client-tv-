@@ -90,7 +90,7 @@ class _MainScreenState extends State<MainScreen> {
   }
 }
 
-/// Mesh Server Screen with real-time status monitoring, server checks, and fallbacks
+/// Mesh Server Screen with concurrency locks to prevent port-binding race conditions
 class MeshServerScreen extends StatefulWidget {
   const MeshServerScreen({super.key});
 
@@ -103,6 +103,7 @@ class _MeshServerScreenState extends State<MeshServerScreen> {
   String _statusMessage = "Initializing Python execution environment...";
   bool _isServerActive = false;
   bool _isChecking = true;
+  bool _isBooting = false; // Guard lock against concurrent boot calls
 
   @override
   void initState() {
@@ -111,19 +112,20 @@ class _MeshServerScreenState extends State<MeshServerScreen> {
   }
 
   Future<void> _bootAndVerifyServer() async {
+    if (_isBooting) return; // Prevent overlapping execution triggers
     setState(() {
+      _isBooting = true;
       _isChecking = true;
       _statusMessage = "Starting background Python server...";
     });
 
     try {
-      // 1. Boot the Python server via serious_python from the assets path
+      // Run server script from bundled asset path
       await SeriousPython.run("assets/python/server.py");
       
-      // Give the server a brief moment to bind to the socket port 9090
-      await Future.delayed(const Duration(seconds: 15));
+      // Give the server a brief moment to bind to socket port 9090
+      await Future.delayed(const Duration(seconds: 5));
 
-      // 2. Perform a local HTTP health check request against our own Tailscale endpoint to confirm status
       final healthUrl = Uri.parse('http://$_tailscaleIp:9090/');
       final response = await http.get(healthUrl).timeout(const Duration(seconds: 3));
 
@@ -132,12 +134,12 @@ class _MeshServerScreenState extends State<MeshServerScreen> {
           _isServerActive = true;
           _statusMessage = "Server Active & Responding on Tailscale Mesh.";
           _isChecking = false;
+          _isBooting = false;
         });
       } else {
         _triggerFallback("Server responded with unexpected status code: ${response.statusCode}");
       }
     } catch (e) {
-      // Fallback mode triggered if the server socket couldn't bind or health check failed
       _triggerFallback("Could not verify server ping ($e). Operating in fallback standalone mode.");
     }
   }
@@ -147,6 +149,7 @@ class _MeshServerScreenState extends State<MeshServerScreen> {
       _isServerActive = false;
       _statusMessage = "Fallback Active: $reason Local media UI remains fully operational.";
       _isChecking = false;
+      _isBooting = false;
     });
   }
 
@@ -224,7 +227,7 @@ class _MeshServerScreenState extends State<MeshServerScreen> {
                         backgroundColor: Colors.blue.shade700,
                         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                       ),
-                      onPressed: _isChecking ? null : _bootAndVerifyServer,
+                      onPressed: (_isChecking || _isBooting) ? null : _bootAndVerifyServer,
                       icon: const Icon(Icons.refresh),
                       label: const Text('Restart & Re-verify Server'),
                     ),
@@ -252,6 +255,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
   bool _isLoading = true;
   int _selectedAddonIndex = 0;
   bool _pythonInitialized = false;
+  String? _activeCatalogUrl; // Tracking token to discard stale async requests
 
   final String masterIndexUrl = 'https://jch0029987-glitch.github.io/media-client-backend/addons.json';
 
@@ -291,15 +295,21 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 
   Future<void> _fetchCatalog(String catalogUrl) async {
+    _activeCatalogUrl = catalogUrl; // Mark the latest intent
     setState(() => _isLoading = true);
+    
     try {
       final response = await http.get(Uri.parse(catalogUrl));
+      if (_activeCatalogUrl != catalogUrl) return; // Discard if user switched providers
+
       if (response.statusCode == 200) {
         String rawBody = response.body;
 
         if (_pythonInitialized) {
           try {
             final String? pythonResponse = await SeriousPython.run("assets/python/plugin_runner.py");
+            if (_activeCatalogUrl != catalogUrl) return; // Guard check
+            
             if (pythonResponse != null) {
               final decodedPython = json.decode(pythonResponse);
               if (decodedPython['status'] == 'success') {
@@ -314,13 +324,17 @@ class _LibraryScreenState extends State<LibraryScreen> {
         }
 
         final data = json.decode(rawBody);
+        if (_activeCatalogUrl != catalogUrl) return;
+        
         setState(() {
           _currentCatalogItems = data['items'] ?? [];
           _isLoading = false;
         });
       }
     } catch (e) {
-      setState(() => _isLoading = false);
+      if (_activeCatalogUrl == catalogUrl) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
