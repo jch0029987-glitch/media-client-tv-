@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       build_release:
-        description: 'Build signed release APK?'
+        description: 'Build signed release APK & Publish to Releases?'
         required: true
         type: boolean
         default: false
@@ -12,6 +12,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # Required to create releases and upload assets
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -65,3 +67,14 @@ jobs:
           name: media-client-tv-binary
           path: build/app/outputs/flutter-apk/
           retention-days: 7
+
+      - name: Publish GitHub Release & Upload APK
+        if: ${{ inputs.build_release == true }}
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/app/outputs/flutter-apk/app-release.apk
+          tag_name: v1.0.0-${{ github.run_number }}
+          name: "Media Client TV v1.0.0-${{ github.run_number }}"
+          body: "Automated signed release build for Android TV."
+          draft: false
+          prerelease: false
