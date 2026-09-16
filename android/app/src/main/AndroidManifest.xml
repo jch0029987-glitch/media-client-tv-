@@ -15,12 +15,14 @@
         android:name="android.hardware.touchscreen"
         android:required="false" />
 
+    <!-- Required for local HTTP Tailscale RPC server traffic -->
     <application
         android:label="Media Client TV"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:banner="@mipmap/ic_launcher"
-        android:usesCleartextTraffic="true"> <!-- Required for local HTTP Tailscale RPC server traffic -->
+        android:usesCleartextTraffic="true"
+        android:extractNativeLibs="true">
 
         <activity
             android:name=".MainActivity"
