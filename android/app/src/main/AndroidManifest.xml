@@ -2,9 +2,8 @@
 
     <!-- Required for fetching updates and backend media streaming -->
     <uses-permission android:name="android.permission.INTERNET" />
-    
-    <!-- Required to trigger the system APK installer package prompt -->
-    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+<uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <!-- Android TV hardware declarations -->
     <uses-feature
