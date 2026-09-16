@@ -97,10 +97,14 @@ def start_secure_server():
     print(f"  TV SECURE STARTUP PASSWORD: {DYNAMIC_PASSWORD}")
     print(f"==========================================\n")
     
-    # Optionally save the IP and state so a local UI or QR can use it if needed
+    # Save the IP, port, and temporary password state so Flutter can read it
     os.makedirs("shared", exist_ok=True)
     with open("shared/pairing_state.json", "w") as f:
-        json.dump({"ip": tv_ip, "port": port}, f)
+        json.dump({
+            "ip": tv_ip, 
+            "port": port,
+            "temp_password": DYNAMIC_PASSWORD
+        }, f)
 
     server = HTTPServer(('0.0.0.0', port), SecureRPCHandler)
     print(f"Server running on http://{tv_ip}:{port}...\n")
