@@ -26,30 +26,48 @@ jobs:
 
       - name: Regenerate Android Scaffold & Restore Custom Files
         run: |
-          # 1. Copy custom files to a temporary backup directory (if they exist)
+          echo "1. Copying custom files to temporary backup..."
           mkdir -p /tmp/android_backup
-          [ -f android/app/src/main/AndroidManifest.xml ] && cp android/app/src/main/AndroidManifest.xml /tmp/android_backup/
-          [ -d android/app/src/main/kotlin ] && cp -r android/app/src/main/kotlin /tmp/android_backup/
-          [ -d android/app/src/main/res/xml ] && cp -r android/app/src/main/res/xml /tmp/android_backup/
-          [ -f android/app/key.properties ] && cp android/app/key.properties /tmp/android_backup/
+          
+          if [ -f "android/app/src/main/AndroidManifest.xml" ]; then
+            cp android/app/src/main/AndroidManifest.xml /tmp/android_backup/
+          fi
+          
+          if [ -d "android/app/src/main/kotlin" ]; then
+            cp -r android/app/src/main/kotlin /tmp/android_backup/
+          fi
+          
+          if [ -d "android/app/src/main/res/xml" ]; then
+            cp -r android/app/src/main/res/xml /tmp/android_backup/
+          fi
+          
+          if [ -f "android/app/key.properties" ]; then
+            cp android/app/key.properties /tmp/android_backup/
+          fi
 
-          # 2. Delete the old android directory
+          echo "2. Deleting old android directory..."
           rm -rf android
 
-          # 3. Regen clean Android scaffold
+          echo "3. Regenerating clean Android scaffold..."
           flutter create . --platforms=android
 
-          # 4. Ensure destination directories exist and copy custom files back
-          [ -f /tmp/android_backup/AndroidManifest.xml ] && cp /tmp/android_backup/AndroidManifest.xml android/app/src/main/AndroidManifest.xml
+          echo "4. Restoring custom files..."
+          if [ -f "/tmp/android_backup/AndroidManifest.xml" ]; then
+            cp /tmp/android_backup/AndroidManifest.xml android/app/src/main/AndroidManifest.xml
+          fi
           
-          if [ -d /tmp/android_backup/kotlin ]; then
+          if [ -d "/tmp/android_backup/kotlin" ]; then
             KOTLIN_DEST=$(find android/app/src/main/kotlin -type d | head -n 1)
             cp -r /tmp/android_backup/kotlin/* "$KOTLIN_DEST/" || true
           fi
           
-          if [ -d /tmp/android_backup/xml ]; then
+          if [ -d "/tmp/android_backup/xml" ]; then
             mkdir -p android/app/src/main/res/xml
             cp -r /tmp/android_backup/xml/* android/app/src/main/res/xml/
           fi
           
-          [ -f /tmp/android_backup/key.properties ] && cp /tmp/android_backup/key.properties android/app/key.properties
+          if [ -f "/tmp/android_backup/key.properties" ]; then
+            cp /tmp/android_backup/key.properties android/app/key.properties
+          fi
+          
+          echo "Scaffold regeneration and restoration completed successfully!"
