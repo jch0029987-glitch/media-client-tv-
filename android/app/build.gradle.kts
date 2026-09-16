@@ -6,11 +6,10 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
-// Load key.properties for release signing if it exists
-def keystorePropertiesFile = rootProject.file("key.properties")
-def keystoreProperties = new Properties()
+val keystorePropertiesFile = rootProject.file("key.properties")
+val keystoreProperties = Properties()
 if (keystorePropertiesFile.exists()) {
-    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
 }
 
 android {
@@ -32,27 +31,27 @@ android {
     }
 
     signingConfigs {
-        release {
-            if (keystoreProperties.containsKey('storeFile')) {
-                storeFile = file(keystoreProperties.getProperty('storeFile'))
-                storePassword = keystoreProperties.getProperty('storePassword')
-                keyAlias = keystoreProperties.getProperty('keyAlias')
-                keyPassword = keystoreProperties.getProperty('keyPassword')
+        create("release") {
+            if (keystoreProperties.containsKey("storeFile")) {
+                storeFile = file(keystoreProperties.getProperty("storeFile"))
+                storePassword = keystoreProperties.getProperty("storePassword")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
             }
         }
     }
 
     buildTypes {
-        release {
-            // Use the release signing config if available, fallback to debug otherwise
-            signingConfig = keystoreProperties.containsKey('storeFile') ? signingConfigs.getByName("release") : signingConfigs.getByName("debug")
+        getByName("release") {
+            val hasReleaseStore = keystoreProperties.containsKey("storeFile")
+            signingConfig = if (hasReleaseStore) signingConfigs.getByName("release") else signingConfigs.getByName("debug")
         }
     }
 }
 
 kotlin {
     compilerOptions {
-        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
     }
 }
 
