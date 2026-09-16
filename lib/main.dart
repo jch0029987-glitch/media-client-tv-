@@ -117,8 +117,8 @@ class _MeshServerScreenState extends State<MeshServerScreen> {
     });
 
     try {
-      // 1. Boot the Python server via serious_python
-      await SeriousPython.run("server.py");
+      // 1. Boot the Python server via serious_python from the assets path
+      await SeriousPython.run("assets/python/server.py");
       
       // Give the server a brief moment to bind to the socket port 9090
       await Future.delayed(const Duration(seconds: 15));
@@ -263,7 +263,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   Future<void> _initPythonAndFetch() async {
     try {
-      await SeriousPython.run("plugin_runner.py");
+      await SeriousPython.run("assets/python/plugin_runner.py");
       setState(() => _pythonInitialized = true);
     } catch (e) {
       // Fallback gracefully
@@ -299,7 +299,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
         if (_pythonInitialized) {
           try {
-            final String? pythonResponse = await SeriousPython.run("plugin_runner.py");
+            final String? pythonResponse = await SeriousPython.run("assets/python/plugin_runner.py");
             if (pythonResponse != null) {
               final decodedPython = json.decode(pythonResponse);
               if (decodedPython['status'] == 'success') {
