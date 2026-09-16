@@ -26,11 +26,11 @@ jobs:
 
       - name: Regenerate Android Scaffold & Restore Custom Files
         run: |
-          # 1. Copy custom files to a temporary backup directory
+          # 1. Copy custom files to a temporary backup directory (if they exist)
           mkdir -p /tmp/android_backup
-          cp android/app/src/main/AndroidManifest.xml /tmp/android_backup/
-          cp -r android/app/src/main/kotlin /tmp/android_backup/
-          cp -r android/app/src/main/res/xml /tmp/android_backup/
+          [ -f android/app/src/main/AndroidManifest.xml ] && cp android/app/src/main/AndroidManifest.xml /tmp/android_backup/
+          [ -d android/app/src/main/kotlin ] && cp -r android/app/src/main/kotlin /tmp/android_backup/
+          [ -d android/app/src/main/res/xml ] && cp -r android/app/src/main/res/xml /tmp/android_backup/
           [ -f android/app/key.properties ] && cp android/app/key.properties /tmp/android_backup/
 
           # 2. Delete the old android directory
@@ -39,8 +39,17 @@ jobs:
           # 3. Regen clean Android scaffold
           flutter create . --platforms=android
 
-          # 4. Copy the custom files back into the new scaffold
-          cp /tmp/android_backup/AndroidManifest.xml android/app/src/main/AndroidManifest.xml
-          cp -r /tmp/android_backup/kotlin/* android/app/src/main/kotlin/
-          cp -r /tmp/android_backup/xml/* android/app/src/main/res/xml/
+          # 4. Ensure destination directories exist and copy custom files back
+          [ -f /tmp/android_backup/AndroidManifest.xml ] && cp /tmp/android_backup/AndroidManifest.xml android/app/src/main/AndroidManifest.xml
+          
+          if [ -d /tmp/android_backup/kotlin ]; then
+            KOTLIN_DEST=$(find android/app/src/main/kotlin -type d | head -n 1)
+            cp -r /tmp/android_backup/kotlin/* "$KOTLIN_DEST/" || true
+          fi
+          
+          if [ -d /tmp/android_backup/xml ]; then
+            mkdir -p android/app/src/main/res/xml
+            cp -r /tmp/android_backup/xml/* android/app/src/main/res/xml/
+          fi
+          
           [ -f /tmp/android_backup/key.properties ] && cp /tmp/android_backup/key.properties android/app/key.properties
