@@ -14,7 +14,8 @@ if (keystorePropertiesFile.exists()) {
 
 android {
     namespace = "com.example.media_client_tv"
-    compileSdk = flutter.compileSdkVersion
+    // Explicitly set compileSdk to 34 to satisfy serious_python and AndroidX metadata checks
+    compileSdk = 34
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
@@ -25,7 +26,7 @@ android {
     defaultConfig {
         applicationId = "com.example.media_client_tv"
         minSdk = flutter.minSdkVersion
-        targetSdk = flutter.targetSdkVersion
+        targetSdk = 34
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
