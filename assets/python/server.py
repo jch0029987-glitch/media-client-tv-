@@ -100,7 +100,7 @@ def start_secure_server():
     with open("shared/pairing_state.json", "w") as f:
         json.dump(state_data, f)
     
-    pairing_url = f"https://YOUR_GITHUB_USERNAME.github.io/media-client-backend/admin/#ip={tv_ip}&challenge={challenge_nonce}"
+    pairing_url = f"https://jch0029987-glitch.github.io/media-client-backend/admin/#ip={tv_ip}&challenge={challenge_nonce}"
     
     print(f"\n[Secure Pairing] Scan this QR code with your phone to pair securely:")
     qr = qrcode.QRCode()
