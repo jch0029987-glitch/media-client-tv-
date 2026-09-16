@@ -4,8 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
+import 'package:serious_python/serious_python.dart';
+import 'screens/player_screen.dart'; // Ensure you have this screen created separately
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(const MediaClientApp());
 }
 
@@ -82,8 +85,98 @@ class _MainScreenState extends State<MainScreen> {
   }
 }
 
-class LibraryScreen extends StatelessWidget {
+class LibraryScreen extends StatefulWidget {
   const LibraryScreen({super.key});
+
+  @override
+  State<LibraryScreen> createState() => _LibraryScreenState();
+}
+
+class _LibraryScreenState extends State<LibraryScreen> {
+  List<dynamic> _addons = [];
+  List<dynamic> _currentCatalogItems = [];
+  bool _isLoading = true;
+  int _selectedAddonIndex = 0;
+  bool _pythonInitialized = false;
+
+  // Replace with your actual GitHub Pages raw URL
+  final String masterIndexUrl = 'https://YOUR_GITHUB_USERNAME.github.io/media-client-backend/addons.json';
+
+  @override
+  void initState() {
+    super.initState();
+    _initPythonAndFetch();
+  }
+
+  Future<void> _initPythonAndFetch() async {
+    try {
+      await SeriousPython.run("plugin_runner.py");
+      setState(() => _pythonInitialized = true);
+    } catch (e) {
+      // Fallback gracefully if python runner asset fails initialization
+    }
+    _fetchMasterIndex();
+  }
+
+  Future<void> _fetchMasterIndex() async {
+    try {
+      final response = await http.get(Uri.parse(masterIndexUrl));
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        setState(() {
+          _addons = data['addons'] ?? [];
+        });
+        if (_addons.isNotEmpty) {
+          _fetchCatalog(_addons[0]['catalog_url']);
+        } else {
+          setState(() => _isLoading = false);
+        }
+      }
+    } catch (e) {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _fetchCatalog(String catalogUrl) async {
+    setState(() => _isLoading = true);
+    try {
+      final response = await http.get(Uri.parse(catalogUrl));
+      if (response.statusCode == 200) {
+        String rawBody = response.body;
+
+        // Process through embedded Python interpreter bridge if ready
+        if (_pythonInitialized) {
+          try {
+            final String? pythonResponse = await SeriousPython.run(
+              "plugin_runner.py",
+              args: [rawBody],
+            );
+            if (pythonResponse != null) {
+              final decodedPython = json.decode(pythonResponse);
+              if (decodedPython['status'] == 'success') {
+                setState(() {
+                  _currentCatalogItems = decodedPython['items'] ?? [];
+                  _isLoading = false;
+                });
+                return;
+              }
+            }
+          } catch (_) {
+            // Fallback to standard parsing on exception
+          }
+        }
+
+        // Standard JSON fallback
+        final data = json.decode(rawBody);
+        setState(() {
+          _currentCatalogItems = data['items'] ?? [];
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      setState(() => _isLoading = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -92,56 +185,119 @@ class LibraryScreen extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Media Library',
-            style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white),
-          ),
-          const SizedBox(height: 24),
-          Expanded(
-            child: GridView.builder(
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 3,
-                crossAxisSpacing: 20,
-                mainAxisSpacing: 20,
-                childAspectRatio: 16 / 9,
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'Media Library',
+                style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white),
               ),
-              itemCount: 6,
-              itemBuilder: (context, index) {
-                return Focus(
-                  child: Builder(
-                    builder: (context) {
-                      final hasFocus = Focus.of(context).hasFocus;
-                      return AnimatedContainer(
-                        duration: const Duration(milliseconds: 200),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF2C2C2C),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(
-                            color: hasFocus ? Colors.blueAccent : Colors.transparent,
-                            width: 3,
-                          ),
-                          boxShadow: hasFocus
-                              ? [
-                                  const BoxShadow(
-                                    color: Colors.blueAccent,
-                                    blurRadius: 10,
-                                    spreadRadius: 2,
-                                  )
-                                ]
-                              : [],
-                        ),
-                        child: Center(
-                          child: Text(
-                            'Media Item ${index + 1}',
-                            style: const TextStyle(fontSize: 16, color: Colors.white),
+              // Provider Selector Chips for D-Pad Focus
+              if (_addons.isNotEmpty)
+                SizedBox(
+                  height: 40,
+                  child: ListView.builder(
+                    scrollDirection: Axis.horizontal,
+                    shrinkWrap: true,
+                    itemCount: _addons.length,
+                    itemBuilder: (context, index) {
+                      final addon = _addons[index];
+                      final isSelected = _selectedAddonIndex == index;
+                      return Padding(
+                        padding: const EdgeInsets.only(left: 8.0),
+                        child: Focus(
+                          child: Builder(
+                            builder: (context) {
+                              final hasFocus = Focus.of(context).hasFocus;
+                              return ActionChip(
+                                backgroundColor: isSelected ? Colors.blueAccent : const Color(0xFF2C2C2C),
+                                label: Text(addon['name'] ?? 'Provider'),
+                                labelStyle: const TextStyle(color: Colors.white),
+                                onPressed: () {
+                                  setState(() => _selectedAddonIndex = index);
+                                  _fetchCatalog(addon['catalog_url']);
+                                },
+                              );
+                            },
                           ),
                         ),
                       );
                     },
                   ),
-                );
-              },
-            ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 24),
+          Expanded(
+            child: _isLoading
+                ? const Center(child: CircularProgressIndicator(color: Colors.blueAccent))
+                : _currentCatalogItems.isEmpty
+                    ? const Center(child: Text('No media items found in this catalog.', style: TextStyle(color: Colors.white54)))
+                    : GridView.builder(
+                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 3,
+                          crossAxisSpacing: 20,
+                          mainAxisSpacing: 20,
+                          childAspectRatio: 16 / 9,
+                        ),
+                        itemCount: _currentCatalogItems.length,
+                        itemBuilder: (context, index) {
+                          final item = _currentCatalogItems[index];
+                          return Focus(
+                            child: Builder(
+                              builder: (context) {
+                                final hasFocus = Focus.of(context).hasFocus;
+                                return AnimatedContainer(
+                                  duration: const Duration(milliseconds: 200),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF2C2C2C),
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(
+                                      color: hasFocus ? Colors.blueAccent : Colors.transparent,
+                                      width: 3,
+                                    ),
+                                    boxShadow: hasFocus
+                                        ? [
+                                            const BoxShadow(
+                                              color: Colors.blueAccent,
+                                              blurRadius: 10,
+                                              spreadRadius: 2,
+                                            )
+                                          ]
+                                        : [],
+                                  ),
+                                  child: InkWell(
+                                    onTap: () {
+                                      if (item['type'] == 'http_stream') {
+                                        Navigator.push(
+                                          context,
+                                          MaterialPageRoute(
+                                            builder: (context) => PlayerScreen(
+                                              streamUrl: item['stream_url'],
+                                              title: item['title'],
+                                            ),
+                                          ),
+                                        );
+                                      }
+                                    },
+                                    borderRadius: BorderRadius.circular(8),
+                                    child: Center(
+                                      child: Padding(
+                                        padding: const EdgeInsets.all(12.0),
+                                        child: Text(
+                                          item['title'] ?? 'Unknown Item',
+                                          textAlign: TextAlign.center,
+                                          style: const TextStyle(fontSize: 16, color: Colors.white, fontWeight: FontWeight.bold),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                          );
+                        },
+                      ),
           ),
         ],
       ),
@@ -168,7 +324,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     });
 
     try {
-      // TODO: Replace with your actual GitHub username and repository name
       const owner = 'YOUR_GITHUB_USERNAME';
       const repo = 'media-client-tv';
       final url = Uri.parse('https://api.github.com/repos/$owner/$repo/releases/latest');
@@ -179,7 +334,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         final data = jsonDecode(response.body);
         String latestTag = data['tag_name'] ?? '';
         
-        const currentVersion = 'v1.0.0-1'; // Match against your release tag schema
+        const currentVersion = 'v1.0.0-1';
         if (latestTag != currentVersion) {
           final assets = data['assets'] as List;
           final apkAsset = assets.firstWhere(
@@ -232,7 +387,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       await sink.close();
       client.close();
 
-      // Trigger native Android installer package intent via method channel
       await _platform.invokeMethod('installApk', {'path': filePath});
     } catch (e) {
       setState(() => _statusMessage = 'Download/Install failed: $e');
