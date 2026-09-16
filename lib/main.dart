@@ -114,13 +114,36 @@ class _PairingScreenState extends State<PairingScreen> {
       // 1. Run the Python backend server via serious_python (runs server.py in background)
       SeriousPython.run("server.py");
       
-      // 2. Resolve Tailscale IP and generate pairing link matching backend logic
-      String ip = await _getTailscaleIP();
-      // In production, your python server can pass its dynamic challenge via a local temp file or channel
-      String challengeNonce = "dynamic_challenge_from_tv"; 
+      // 2. Give Python a brief moment to initialize and write out the pairing state JSON file
+      await Future.delayed(const Duration(milliseconds: 800));
+
+      // 3. Read the dynamic Tailscale IP and challenge nonce generated securely by Python
+      String ip = "127.0.0.1";
+      String challengeNonce = "";
+
+      try {
+        final appDocDir = await getApplicationSupportDirectory();
+        final stateFile = File('${appDocDir.path}/shared/pairing_state.json');
+        
+        // Alternatively, depending on serious_python's working directory, check relative path:
+        final localStateFile = File('shared/pairing_state.json');
+        
+        File targetFile = await localStateFile.exists() ? localStateFile : stateFile;
+        
+        if (await targetFile.exists()) {
+          final contents = await targetFile.readAsString();
+          final data = json.decode(contents);
+          ip = data['ip'] ?? ip;
+          challengeNonce = data['challenge'] ?? '';
+        } else {
+          ip = await _getTailscaleIP();
+        }
+      } catch (_) {
+        ip = await _getTailscaleIP();
+      }
 
       setState(() {
-        _pairingUrl = "https://jch0029987-glitch.github.io/media-client-backend/admin/#ip=$ip&challenge=$challengeNonce";
+        _pairingUrl = "https://YOUR_GITHUB_USERNAME.github.io/media-client-backend/admin/#ip=$ip&challenge=$challengeNonce";
         _serverRunning = true;
       });
     } catch (e) {
@@ -198,7 +221,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
   int _selectedAddonIndex = 0;
   bool _pythonInitialized = false;
 
-  final String masterIndexUrl = 'https://jch0029987-glitch.github.io/media-client-backend/addons.json';
+  final String masterIndexUrl = 'https://YOUR_GITHUB_USERNAME.github.io/media-client-backend/addons.json';
 
   @override
   void initState() {
