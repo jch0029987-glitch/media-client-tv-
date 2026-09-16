@@ -2,8 +2,10 @@
 
     <!-- Required for fetching updates and backend media streaming -->
     <uses-permission android:name="android.permission.INTERNET" />
-<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-<uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    
+    <!-- Required to trigger the system APK installer package prompt -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <!-- Android TV hardware declarations -->
     <uses-feature
@@ -17,7 +19,8 @@
         android:label="Media Client TV"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
-        android:banner="@mipmap/ic_launcher"> <!-- Optional: Add a custom TV banner graphic here later -->
+        android:banner="@mipmap/ic_launcher"
+        android:usesCleartextTraffic="true"> <!-- Required for local HTTP Tailscale RPC server traffic -->
 
         <activity
             android:name=".MainActivity"
