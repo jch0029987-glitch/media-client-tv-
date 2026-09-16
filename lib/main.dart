@@ -46,7 +46,7 @@ class _MainScreenState extends State<MainScreen> {
 
   final List<Widget> _screens = const [
     LibraryScreen(),
-    PairingScreen(),
+    MeshServerScreen(),
     SettingsScreen(),
   ];
 
@@ -70,8 +70,8 @@ class _MainScreenState extends State<MainScreen> {
                 label: Text('Library'),
               ),
               NavigationRailDestination(
-                icon: Icon(Icons.security),
-                label: Text('Pairing'),
+                icon: Icon(Icons.dns),
+                label: Text('Mesh RPC'),
               ),
               NavigationRailDestination(
                 icon: Icon(Icons.settings),
@@ -90,77 +90,64 @@ class _MainScreenState extends State<MainScreen> {
   }
 }
 
-/// Pairing Screen that generates the password, writes state, and boots the Python RPC server
-class PairingScreen extends StatefulWidget {
-  const PairingScreen({super.key});
+/// Mesh Server Screen with real-time status monitoring, server checks, and fallbacks
+class MeshServerScreen extends StatefulWidget {
+  const MeshServerScreen({super.key});
 
   @override
-  State<PairingScreen> createState() => _PairingScreenState();
+  State<MeshServerScreen> createState() => _MeshServerScreenState();
 }
 
-class _PairingScreenState extends State<PairingScreen> {
-  String _tempPassword = "Loading...";
-  String _tailscaleIp = "Checking IP...";
-  bool _serverRunning = false;
+class _MeshServerScreenState extends State<MeshServerScreen> {
+  final String _tailscaleIp = "100.99.24.58";
+  String _statusMessage = "Initializing Python execution environment...";
+  bool _isServerActive = false;
+  bool _isChecking = true;
 
   @override
   void initState() {
     super.initState();
-    _initAndStartServer();
+    _bootAndVerifyServer();
   }
 
-  String _generateRandomPassword() {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    Random rnd = Random();
-    return List.generate(6, (index) => chars[rnd.nextInt(chars.length)]).join();
-  }
+  Future<void> _bootAndVerifyServer() async {
+    setState(() {
+      _isChecking = true;
+      _statusMessage = "Starting background Python server...";
+    });
 
-  Future<void> _initAndStartServer() async {
     try {
-      String ip = await _getTailscaleIP();
-      String password = _generateRandomPassword();
-
-      // 1. Write the pairing state file into Flutter's app support directory first
-      final appDocDir = await getApplicationSupportDirectory();
-      final sharedDir = Directory('${appDocDir.path}/shared');
-      if (!await sharedDir.exists()) {
-        await sharedDir.create(recursive: true);
-      }
+      // 1. Boot the Python server via serious_python
+      await SeriousPython.run("server.py");
       
-      final file = File('${sharedDir.path}/pairing_state.json');
-      await file.writeAsString(json.encode({
-        "ip": ip,
-        "port": 9090,
-        "temp_password": password
-      }));
+      // Give the server a brief moment to bind to the socket port 9090
+      await Future.delayed(const Duration(seconds: 15));
 
-      // 2. Run the Python backend server via serious_python
-      SeriousPython.run("server.py");
+      // 2. Perform a local HTTP health check request against our own Tailscale endpoint to confirm status
+      final healthUrl = Uri.parse('http://$_tailscaleIp:9090/');
+      final response = await http.get(healthUrl).timeout(const Duration(seconds: 3));
 
-      setState(() {
-        _tailscaleIp = ip;
-        _tempPassword = password;
-        _serverRunning = true;
-      });
+      if (response.statusCode == 200) {
+        setState(() {
+          _isServerActive = true;
+          _statusMessage = "Server Active & Responding on Tailscale Mesh.";
+          _isChecking = false;
+        });
+      } else {
+        _triggerFallback("Server responded with unexpected status code: ${response.statusCode}");
+      }
     } catch (e) {
-      setState(() {
-        _tempPassword = "Failed to start";
-        _serverRunning = false;
-      });
+      // Fallback mode triggered if the server socket couldn't bind or health check failed
+      _triggerFallback("Could not verify server ping ($e). Operating in fallback standalone mode.");
     }
   }
 
-  Future<String> _getTailscaleIP() async {
-    try {
-      for (var interface in await NetworkInterface.list()) {
-        for (var addr in interface.addresses) {
-          if (addr.address.startsWith("100.")) {
-            return addr.address;
-          }
-        }
-      }
-    } catch (_) {}
-    return "127.0.0.1";
+  void _triggerFallback(String reason) {
+    setState(() {
+      _isServerActive = false;
+      _statusMessage = "Fallback Active: $reason Local media UI remains fully operational.";
+      _isChecking = false;
+    });
   }
 
   @override
@@ -171,45 +158,79 @@ class _PairingScreenState extends State<PairingScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'Secure TV Authentication',
+            'Tailscale Mesh Server Status',
             style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white),
           ),
           const SizedBox(height: 12),
           const Text(
-            'Enter this Tailscale IP and temporary password into your admin web panel:',
+            'Monitors the background JSON-RPC server for remote browser connection.',
             style: TextStyle(color: Colors.white70, fontSize: 14),
           ),
           const SizedBox(height: 32),
           Expanded(
             child: Center(
-              child: _serverRunning
-                  ? Container(
-                      padding: const EdgeInsets.all(30),
+              child: Container(
+                padding: const EdgeInsets.all(30),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1E1E1E),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: _isServerActive ? Colors.greenAccent.withOpacity(0.5) : Colors.orangeAccent.withOpacity(0.5),
+                    width: 2,
+                  ),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _isChecking
+                        ? const CircularProgressIndicator(color: Colors.blueAccent)
+                        : Icon(
+                            _isServerActive ? Icons.check_circle : Icons.warning_amber_rounded,
+                            color: _isServerActive ? Colors.greenAccent : Colors.orangeAccent,
+                            size: 48,
+                          ),
+                    const SizedBox(height: 16),
+                    Text(
+                      _isServerActive ? 'STATUS: ONLINE (MESH SECURED)' : 'STATUS: FALLBACK / STANDALONE',
+                      style: TextStyle(
+                        color: _isServerActive ? Colors.greenAccent : Colors.orangeAccent,
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    const Text('Tailscale Chrome Endpoint', style: TextStyle(color: Colors.white54, fontSize: 12)),
+                    const SizedBox(height: 6),
+                    Text(
+                      'http://$_tailscaleIp:9090',
+                      style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold, letterSpacing: 1.2),
+                    ),
+                    const SizedBox(height: 16),
+                    Container(
+                      padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF1E1E1E),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.blueAccent.withOpacity(0.5), width: 2),
+                        color: Colors.black45,
+                        borderRadius: BorderRadius.circular(8),
                       ),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Text('Tailscale IP / Hostname', style: TextStyle(color: Colors.white54, fontSize: 12)),
-                          const SizedBox(height: 4),
-                          Text(
-                            _tailscaleIp,
-                            style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold, letterSpacing: 1.2),
-                          ),
-                          const SizedBox(height: 24),
-                          const Text('Temporary Password', style: TextStyle(color: Colors.white54, fontSize: 12)),
-                          const SizedBox(height: 4),
-                          Text(
-                            _tempPassword,
-                            style: const TextStyle(color: Color(0xFF03DAC6), fontSize: 36, fontWeight: FontWeight.bold, letterSpacing: 2.0),
-                          ),
-                        ],
+                      child: Text(
+                        _statusMessage,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: Colors.white70, fontSize: 13),
                       ),
-                    )
-                  : const CircularProgressIndicator(color: Colors.blueAccent),
+                    ),
+                    const SizedBox(height: 24),
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blue.shade700,
+                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                      ),
+                      onPressed: _isChecking ? null : _bootAndVerifyServer,
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('Restart & Re-verify Server'),
+                    ),
+                  ],
+                ),
+              ),
             ),
           ),
         ],
