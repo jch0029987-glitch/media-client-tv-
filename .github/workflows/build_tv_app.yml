@@ -36,6 +36,33 @@ jobs:
           echo "flutter.compileSdkVersion=36" > android/local.properties
           echo "flutter.targetSdkVersion=34" >> android/local.properties
 
+      - name: Build LuaJIT for armeabi-v7a (Cloud CI)
+        run: |
+          echo "Cloning LuaJIT source..."
+          git clone https://github.com/LuaJIT/LuaJIT.git
+          cd LuaJIT
+
+          # Automatically locate the Android NDK pre-installed on the GitHub runner
+          NDK_PATH=$(find $ANDROID_SDK_ROOT/ndk -maxdepth 1 -mindepth 1 | sort -V | tail -n 1)
+          echo "Using Android NDK at: $NDK_PATH"
+          
+          TOOLCHAIN="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64"
+          export CC="$TOOLCHAIN/bin/armv7a-linux-androideabi21-clang"
+          export AR="$TOOLCHAIN/bin/llvm-ar"
+          export STRIP="$TOOLCHAIN/bin/llvm-strip"
+
+          echo "Compiling LuaJIT for 32-bit ARM..."
+          make clean
+          make HOST_CC="gcc" CROSS="$TOOLCHAIN/bin/armv7a-linux-androideabi21-" TARGET_SYS=Linux TARGET_CFLAGS="-mfloat-abi=softfp"
+
+          echo "Moving compiled libluajit.so into Android jniLibs..."
+          mkdir -p ../android/app/src/main/jniLibs/armeabi-v7a
+          cp src/libluajit.so ../android/app/src/main/jniLibs/armeabi-v7a/
+          cd ..
+          
+          # Quick verification
+          ls -lh android/app/src/main/jniLibs/armeabi-v7a/libluajit.so
+
       - name: Install Dependencies
         run: flutter pub get
 
@@ -57,7 +84,6 @@ jobs:
 
       - name: Build APK (Chromecast HD Optimized)
         run: |
-          # Build target platform explicitly matching the 32-bit architecture needed
           if [ "${{ inputs.build_release }}" == "true" ]; then
             flutter build apk --release --target-platform=android-arm
           else
@@ -79,6 +105,6 @@ jobs:
             build/app/outputs/flutter-apk/*.apk
           tag_name: v1.0.0-${{ github.run_number }}
           name: "Media Client TV v1.0.0-${{ github.run_number }}"
-          body: "Automated signed release build for Android TV (Chromecast HD optimized 32-bit armeabi-v7a)."
+          body: "Automated signed release build for Android TV (Chromecast HD optimized 32-bit armeabi-v7a with LuaJIT)."
           draft: false
           prerelease: false
