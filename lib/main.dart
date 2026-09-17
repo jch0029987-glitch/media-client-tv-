@@ -9,29 +9,29 @@ import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 
 // Define C function signature mapping for LuaJIT FFI
-typedef LuaEvalC = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> scriptPath);
-typedef LuaEvalDart = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> scriptPath);
+typedef EvalLuaC = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> scriptContent);
+typedef EvalLuaDart = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> scriptContent);
 
 class LuaJitEngine {
   late final ffi.DynamicLibrary _lib;
-  late final LuaEvalDart _eval;
+  late final EvalLuaDart _evalLua;
   bool _initialized = false;
 
   void initialize() {
     if (_initialized) return;
 
     try {
-      // Automatically loads the bundled libluajit.so for armeabi-v7a
       _lib = Platform.isAndroid
           ? ffi.DynamicLibrary.open('libluajit.so')
           : ffi.DynamicLibrary.process();
 
-      // Optional symbol lookup if exported by bridge
-      // _eval = _lib.lookup<ffi.NativeFunction<LuaEvalC>>('bridge_load_plugin').asFunction();
+      _evalLua = _lib
+          .lookup<ffi.NativeFunction<EvalLuaC>>('eval_lua_script')
+          .asFunction();
 
       _initialized = true;
     } catch (e) {
-      print("Failed to load LuaJIT native library: $e");
+      print("Failed to load LuaJIT native library or symbol: $e");
     }
   }
 
@@ -43,7 +43,13 @@ class LuaJitEngine {
       return "LuaJIT Standalone Mock: $scriptContent";
     }
 
-    return "LuaJIT executed successfully.";
+    final scriptPtr = scriptContent.toNativeUtf8();
+    try {
+      final resultPtr = _evalLua(scriptPtr);
+      return resultPtr.toDartString();
+    } finally {
+      calloc.free(scriptPtr);
+    }
   }
 }
 
@@ -130,7 +136,7 @@ class _MainScreenState extends State<MainScreen> {
   }
 }
 
-/// Native Dart Mesh Server Screen with built-in concurrency guards & Lua script receiver
+/// Native Dart Mesh Server Screen with Web UI server and Lua script deployment
 class MeshServerScreen extends StatefulWidget {
   const MeshServerScreen({super.key});
 
@@ -167,7 +173,7 @@ class _MeshServerScreenState extends State<MeshServerScreen> {
     setState(() {
       _isBooting = true;
       _isChecking = true;
-      _statusMessage = "Starting native Dart HTTP/JSON-RPC server...";
+      _statusMessage = "Starting native Dart HTTP server & web control panel...";
     });
 
     try {
@@ -202,18 +208,16 @@ class _MeshServerScreenState extends State<MeshServerScreen> {
 
   Future<void> _handleMeshRequest(HttpRequest request) async {
     final response = request.response;
-    response.headers.contentType = ContentType.json;
 
     try {
       if (request.method == 'GET' && request.uri.path == '/') {
+        // Serve the embedded web UI control panel from assets
+        final htmlContent = await rootBundle.loadString('assets/index.html');
+        response.headers.contentType = ContentType.html;
         response.statusCode = HttpStatus.ok;
-        response.write(json.encode({
-          "status": "online",
-          "node": "media-client-tv-dart-core",
-          "mesh_ip": _tailscaleIp,
-          "timestamp": DateTime.now().toIso8601String(),
-        }));
+        response.write(htmlContent);
       } else if (request.method == 'POST' && request.uri.path == '/rpc') {
+        response.headers.contentType = ContentType.json;
         response.statusCode = HttpStatus.ok;
         response.write(json.encode({
           "jsonrpc": "2.0",
@@ -221,7 +225,7 @@ class _MeshServerScreenState extends State<MeshServerScreen> {
           "id": 1
         }));
       } else if (request.method == 'POST' && request.uri.path == '/api/plugins/save') {
-        // Handle Lua plugin deployment from remote Web UI editor
+        response.headers.contentType = ContentType.json;
         final content = await utf8.decoder.bind(request).join();
         final data = json.decode(content);
         
@@ -243,8 +247,8 @@ class _MeshServerScreenState extends State<MeshServerScreen> {
         final file = File('${pluginDir.path}/$filename');
         await file.writeAsString(luaCode);
 
-        // Execute via FFI Engine verification mock
-        final executionResult = _luaEngine.runScript(file.path);
+        // Execute via LuaJIT FFI Engine
+        final executionResult = _luaEngine.runScript(luaCode);
 
         response.statusCode = HttpStatus.ok;
         response.write(json.encode({
@@ -254,14 +258,16 @@ class _MeshServerScreenState extends State<MeshServerScreen> {
           'engine_status': executionResult,
         }));
       } else {
+        response.headers.contentType = ContentType.json;
         response.statusCode = HttpStatus.notFound;
         response.write(json.encode({"error": "Endpoint not found"}));
       }
     } catch (e) {
+      response.headers.contentType = ContentType.json;
       response.statusCode = HttpStatus.internalServerError;
       response.write(json.encode({"error": e.toString()}));
     } finally {
-      response.close();
+      await response.close();
     }
   }
 
@@ -287,7 +293,7 @@ class _MeshServerScreenState extends State<MeshServerScreen> {
           ),
           const SizedBox(height: 12),
           const Text(
-            'Monitors background native Dart server & accepts remote Lua script deployments.',
+            'Monitors background native Dart server & serves the remote Lua plugin editor UI.',
             style: TextStyle(color: Colors.white70, fontSize: 14),
           ),
           const SizedBox(height: 32),
