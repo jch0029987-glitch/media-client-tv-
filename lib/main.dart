@@ -11,7 +11,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:xml/xml.dart' as xml;
 import 'screens/player_screen.dart';
 
-// Define C function signature mapping for dynamic Lua search FFI
+// Define C function signature mapping for dynamic Lua FFI bindings
+typedef EvalLuaScriptC = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> scriptContent);
+typedef EvalLuaScriptDart = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> scriptContent);
+
 typedef CallLuaSearchC = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> scriptContent, ffi.Pointer<Utf8> queryTerm);
 typedef CallLuaSearchDart = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> scriptContent, ffi.Pointer<Utf8> queryTerm);
 
@@ -29,6 +32,7 @@ class ToastHelper {
 
 class LuaJitEngine {
   late final ffi.DynamicLibrary _lib;
+  late final EvalLuaScriptDart _evalScript;
   late final CallLuaSearchDart _callSearch;
   bool _initialized = false;
 
@@ -40,16 +44,35 @@ class LuaJitEngine {
           ? ffi.DynamicLibrary.open('libluajit.so')
           : ffi.DynamicLibrary.process();
 
+      _evalScript = _lib
+          .lookup<ffi.NativeFunction<EvalLuaScriptC>>('eval_lua_script')
+          .asFunction();
+
       _callSearch = _lib
           .lookup<ffi.NativeFunction<CallLuaSearchC>>('call_lua_search')
           .asFunction();
 
       _initialized = true;
     } catch (e) {
-      print("Failed to load LuaJIT native library or symbol: $e");
+      print("Failed to load LuaJIT native library or symbols: $e");
     }
   }
 
+  /// Evaluates an arbitrary raw Lua script string directly
+  String eval(String scriptContent) {
+    if (!_initialized) initialize();
+    if (!_initialized) return 'Error: Lua engine not initialized';
+
+    final scriptPtr = scriptContent.toNativeUtf8();
+    try {
+      final resultPtr = _evalScript(scriptPtr);
+      return resultPtr.toDartString();
+    } finally {
+      calloc.free(scriptPtr);
+    }
+  }
+
+  /// Invokes the global 'search(query)' function inside a loaded Lua script
   String search(String scriptContent, String queryTerm) {
     if (!_initialized) initialize();
     
