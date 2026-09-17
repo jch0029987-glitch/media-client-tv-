@@ -52,7 +52,7 @@ jobs:
           
           TOOLCHAIN="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64"
 
-          echo "Compiling LuaJIT for 32-bit ARM with 32-bit host tools..."
+          echo "Compiling LuaJIT for 32-bit ARM (bypassing host strip collision)..."
           make clean
           make HOST_CC="gcc -m32" \
                CROSS="" \
@@ -61,7 +61,7 @@ jobs:
                TARGET_LDFLAGS="-latomic" \
                CC="$TOOLCHAIN/bin/clang --target=armv7a-linux-androideabi21" \
                AR="$TOOLCHAIN/bin/llvm-ar rcus" \
-               STRIP="$TOOLCHAIN/bin/llvm-strip"
+               STRIP="true"
 
           echo "Moving compiled libluajit.so into Android jniLibs..."
           mkdir -p ../android/app/src/main/jniLibs/armeabi-v7a
