@@ -65,6 +65,7 @@ jobs:
                       --disable-shared \
                       --enable-static \
                       --without-ssl \
+                      --without-libpsl \
                       --disable-ldap \
                       --disable-dict \
                       --disable-file \
