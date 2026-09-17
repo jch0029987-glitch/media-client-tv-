@@ -9,6 +9,7 @@ import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:xml/xml.dart' as xml;
+import 'screens/player_screen.dart';
 
 // Define C function signature mapping for dynamic Lua search FFI
 typedef CallLuaSearchC = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> scriptContent, ffi.Pointer<Utf8> queryTerm);
@@ -87,21 +88,19 @@ class SkinConfig {
   double contentPadding = 40.0;
   double headerFontSize = 28.0;
   bool showNavigationLabels = true;
-  String navigationLayout = "rail"; // rail vs sidebar
+  String navigationLayout = "rail";
 
   static SkinConfig parseXml(String xmlString) {
     final skin = SkinConfig();
     try {
       final document = xml.XmlDocument.parse(xmlString);
       
-      // Parse Metadata
       final metaElements = document.findAllElements('metadata');
       if (metaElements.isNotEmpty) {
         final nameEl = metaElements.first.findElements('name').firstOrNull;
         if (nameEl != null) skin.skinName = nameEl.innerText.trim();
       }
 
-      // Parse Colors
       final colorElements = document.findAllElements('colors');
       if (colorElements.isNotEmpty) {
         for (var child in colorElements.first.children.whereType<xml.XmlElement>()) {
@@ -118,7 +117,6 @@ class SkinConfig {
         }
       }
 
-      // Parse Layout & Structural Rewrites
       final layoutElements = document.findAllElements('layout');
       if (layoutElements.isNotEmpty) {
         for (var child in layoutElements.first.children.whereType<xml.XmlElement>()) {
@@ -301,7 +299,6 @@ class MeshBackgroundService {
         final file = File('${pluginDir.path}/$filename');
         await file.writeAsString(luaCode);
 
-        // Register loaded plugin in provider
         LibraryPluginProvider().registerLoadedPlugin(filename, luaCode);
 
         final executionResult = _luaEngine.search(luaCode, "test_query");
@@ -501,7 +498,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 
   void _onPluginCatalogUpdated() {
-    if (_pluginProvider.dynamicCatalogItems.isNotEmpty) {
+    if (_activeCatalogUrl == 'local://lua_plugin') {
       setState(() {
         _currentCatalogItems = _pluginProvider.dynamicCatalogItems;
         _isLoading = false;
@@ -512,24 +509,51 @@ class _LibraryScreenState extends State<LibraryScreen> {
   Future<void> _fetchMasterIndex() async {
     try {
       final response = await http.get(Uri.parse(masterIndexUrl));
+      List<dynamic> fetchedAddons = [];
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        setState(() {
-          _addons = data['addons'] ?? [];
-        });
-        if (_addons.isNotEmpty) {
-          _fetchCatalog(_addons[0]['catalog_url']);
-        } else {
-          setState(() => _isLoading = false);
-        }
+        fetchedAddons = data['addons'] ?? [];
+      }
+
+      setState(() {
+        _addons = [
+          {'name': 'Local Lua Plugin', 'catalog_url': 'local://lua_plugin'},
+          ...fetchedAddons
+        ];
+      });
+
+      if (_addons.isNotEmpty) {
+        _selectCatalogProvider(0, _addons[0]['catalog_url']);
+      } else {
+        setState(() => _isLoading = false);
       }
     } catch (_) {
-      setState(() => _isLoading = false);
+      setState(() {
+        _addons = [
+          {'name': 'Local Lua Plugin', 'catalog_url': 'local://lua_plugin'}
+        ];
+        _selectCatalogProvider(0, 'local://lua_plugin');
+      });
+    }
+  }
+
+  void _selectCatalogProvider(int index, String catalogUrl) {
+    setState(() {
+      _selectedAddonIndex = index;
+      _activeCatalogUrl = catalogUrl;
+    });
+
+    if (catalogUrl == 'local://lua_plugin') {
+      setState(() {
+        _currentCatalogItems = _pluginProvider.dynamicCatalogItems;
+        _isLoading = false;
+      });
+    } else {
+      _fetchCatalog(catalogUrl);
     }
   }
 
   Future<void> _fetchCatalog(String catalogUrl) async {
-    _activeCatalogUrl = catalogUrl;
     setState(() => _isLoading = true);
     try {
       final response = await http.get(Uri.parse(catalogUrl));
@@ -583,8 +607,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                               label: Text(addon['name'] ?? 'Provider'),
                               labelStyle: TextStyle(color: skin.textPrimaryColor),
                               onPressed: () {
-                                setState(() => _selectedAddonIndex = index);
-                                _fetchCatalog(addon['catalog_url']);
+                                _selectCatalogProvider(index, addon['catalog_url']);
                               },
                             ),
                           );
@@ -598,7 +621,15 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 child: _isLoading
                     ? Center(child: CircularProgressIndicator(color: skin.primaryColor))
                     : _currentCatalogItems.isEmpty
-                        ? Center(child: Text('No media items found.', style: TextStyle(color: skin.textSecondaryColor)))
+                        ? Center(
+                            child: Text(
+                              _activeCatalogUrl == 'local://lua_plugin'
+                                  ? 'No items from Lua plugin yet.\nDeploy a Lua script via the web mesh UI.'
+                                  : 'No media items found.',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(color: skin.textSecondaryColor),
+                            ),
+                          )
                         : GridView.builder(
                             gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                               crossAxisCount: skin.gridColumns,
@@ -627,7 +658,18 @@ class _LibraryScreenState extends State<LibraryScreen> {
                                             : [],
                                       ),
                                       child: InkWell(
-                                        onTap: () {},
+                                        onTap: () {
+                                          final url = item['url'] ?? '';
+                                          final title = item['title'] ?? item['name'] ?? 'Media Item';
+                                          if (url.isNotEmpty) {
+                                            Navigator.push(
+                                              context,
+                                              MaterialPageRoute(
+                                                builder: (context) => PlayerScreen(mediaUrl: url, mediaTitle: title),
+                                              ),
+                                            );
+                                          }
+                                        },
                                         borderRadius: BorderRadius.circular(skin.cardCornerRadius),
                                         child: Center(
                                           child: Padding(
