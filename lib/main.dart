@@ -68,8 +68,134 @@ class LuaJitEngine {
   }
 }
 
-void main() {
+/// Reactive State Manager for Dynamic Plugin Catalog Ingestion
+class LibraryPluginProvider extends ChangeNotifier {
+  static final LibraryPluginProvider _instance = LibraryPluginProvider._internal();
+  factory LibraryPluginProvider() => _instance;
+  LibraryPluginProvider._internal();
+
+  final List<dynamic> _dynamicCatalogItems = [];
+  List<dynamic> get dynamicCatalogItems => _dynamicCatalogItems;
+
+  void injectPluginItems(List<dynamic> newItems) {
+    _dynamicCatalogItems.clear();
+    _dynamicCatalogItems.addAll(newItems);
+    notifyListeners();
+  }
+}
+
+/// Long-lived background singleton to keep the Mesh HTTP Server active globally
+class MeshBackgroundService {
+  static final MeshBackgroundService _instance = MeshBackgroundService._internal();
+  factory MeshBackgroundService() => _instance;
+  MeshBackgroundService._internal();
+
+  HttpServer? _server;
+  bool _isRunning = false;
+  final int _port = 9090;
+  final LuaJitEngine _luaEngine = LuaJitEngine();
+
+  bool get isRunning => _isRunning;
+
+  Future<void> startServer() async {
+    if (_isRunning) return;
+    try {
+      _luaEngine.initialize();
+      _server = await HttpServer.bind(InternetAddress.anyIPv4, _port);
+      _isRunning = true;
+      print("Background Mesh Server started successfully on port $_port");
+
+      _server!.listen(_handleMeshRequest, onError: (e) {
+        print("Mesh server stream error: $e");
+      });
+    } catch (e) {
+      _isRunning = false;
+      print("Failed to start background mesh server: $e");
+    }
+  }
+
+  Future<void> _handleMeshRequest(HttpRequest request) async {
+    final response = request.response;
+
+    try {
+      if (request.method == 'GET' && request.uri.path == '/') {
+        final htmlContent = await rootBundle.loadString('assets/index.html');
+        response.headers.contentType = ContentType.html;
+        response.statusCode = HttpStatus.ok;
+        response.write(htmlContent);
+      } else if (request.method == 'POST' && request.uri.path == '/rpc') {
+        response.headers.contentType = ContentType.json;
+        response.statusCode = HttpStatus.ok;
+        response.write(json.encode({
+          "jsonrpc": "2.0",
+          "result": {"message": "Command executed successfully via background Dart worker"},
+          "id": 1
+        }));
+      } else if (request.method == 'POST' && request.uri.path == '/api/plugins/save') {
+        response.headers.contentType = ContentType.json;
+        final content = await utf8.decoder.bind(request).join();
+        final data = json.decode(content);
+        
+        final String filename = data['name'] ?? 'plugin.lua';
+        final String luaCode = data['code'] ?? '';
+        
+        if (!filename.endsWith('.lua') || filename.contains('..')) {
+          response.statusCode = HttpStatus.badRequest;
+          response.write(json.encode({'status': 'error', 'message': 'Invalid filename'}));
+          return;
+        }
+        
+        final appDir = await getApplicationDocumentsDirectory();
+        final pluginDir = Directory('${appDir.path}/plugins');
+        if (!await pluginDir.exists()) {
+          await pluginDir.create(recursive: true);
+        }
+        
+        final file = File('${pluginDir.path}/$filename');
+        await file.writeAsString(luaCode);
+
+        // Execute dynamic search test via FFI Engine
+        final executionResult = _luaEngine.search(luaCode, "test_query");
+
+        // Attempt to parse output and push directly into library state
+        try {
+          final parsedOutput = json.decode(executionResult);
+          if (parsedOutput['items'] != null && parsedOutput['items'] is List) {
+            LibraryPluginProvider().injectPluginItems(parsedOutput['items']);
+          }
+        } catch (_) {}
+
+        // Trigger native Android Toast confirmation on the TV display
+        await ToastHelper.showToast('Lua Plugin $filename Deployed Globally!');
+
+        response.statusCode = HttpStatus.ok;
+        response.write(json.encode({
+          'status': 'success',
+          'message': 'Plugin $filename deployed successfully to background storage',
+          'path': file.path,
+          'engine_status': executionResult,
+        }));
+      } else {
+        response.headers.contentType = ContentType.json;
+        response.statusCode = HttpStatus.notFound;
+        response.write(json.encode({"error": "Endpoint not found"}));
+      }
+    } catch (e) {
+      response.headers.contentType = ContentType.json;
+      response.statusCode = HttpStatus.internalServerError;
+      response.write(json.encode({"error": e.toString()}));
+    } finally {
+      await response.close();
+    }
+  }
+}
+
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // Start the mesh server globally in the background right on app boot
+  await MeshBackgroundService().startServer();
+
   runApp(const MediaClientApp());
 }
 
@@ -151,155 +277,17 @@ class _MainScreenState extends State<MainScreen> {
   }
 }
 
-/// Native Dart Mesh Server Screen with Web UI server and Lua script deployment
-class MeshServerScreen extends StatefulWidget {
+/// Mesh Server Screen displaying global status managed by the background service
+class MeshServerScreen extends StatelessWidget {
   const MeshServerScreen({super.key});
 
-  @override
-  State<MeshServerScreen> createState() => _MeshServerScreenState();
-}
-
-class _MeshServerScreenState extends State<MeshServerScreen> {
   final String _tailscaleIp = "100.99.24.58";
-  String _statusMessage = "Initializing native Dart mesh server...";
-  bool _isServerActive = false;
-  bool _isChecking = true;
-  bool _isBooting = false;
-  
-  HttpServer? _nativeHttpServer;
-  int _port = 9090;
-  final LuaJitEngine _luaEngine = LuaJitEngine();
-
-  @override
-  void initState() {
-    super.initState();
-    _luaEngine.initialize();
-    _startNativeServerAndVerify();
-  }
-
-  @override
-  void dispose() {
-    _nativeHttpServer?.close(force: true);
-    super.dispose();
-  }
-
-  Future<void> _startNativeServerAndVerify() async {
-    if (_isBooting) return;
-    setState(() {
-      _isBooting = true;
-      _isChecking = true;
-      _statusMessage = "Starting native Dart HTTP server & web control panel...";
-    });
-
-    try {
-      await _nativeHttpServer?.close(force: true);
-
-      // Bind directly to interface port 9090 using pure Dart
-      _nativeHttpServer = await HttpServer.bind(InternetAddress.anyIPv4, _port);
-      
-      _nativeHttpServer!.listen(_handleMeshRequest, onError: (e) {
-        print("Mesh server stream error: $e");
-      });
-
-      await Future.delayed(const Duration(milliseconds: 500));
-
-      final healthUrl = Uri.parse('http://$_tailscaleIp:$_port/');
-      final response = await http.get(healthUrl).timeout(const Duration(seconds: 3));
-
-      if (response.statusCode == 200) {
-        setState(() {
-          _isServerActive = true;
-          _statusMessage = "Native Dart Server Active & Responding on Tailscale Mesh.";
-          _isChecking = false;
-          _isBooting = false;
-        });
-      } else {
-        _triggerFallback("Server responded with unexpected status code: ${response.statusCode}");
-      }
-    } catch (e) {
-      _triggerFallback("Could not bind port $_port ($e). Operating in fallback standalone mode.");
-    }
-  }
-
-  Future<void> _handleMeshRequest(HttpRequest request) async {
-    final response = request.response;
-
-    try {
-      if (request.method == 'GET' && request.uri.path == '/') {
-        // Serve the embedded web UI control panel from assets
-        final htmlContent = await rootBundle.loadString('assets/index.html');
-        response.headers.contentType = ContentType.html;
-        response.statusCode = HttpStatus.ok;
-        response.write(htmlContent);
-      } else if (request.method == 'POST' && request.uri.path == '/rpc') {
-        response.headers.contentType = ContentType.json;
-        response.statusCode = HttpStatus.ok;
-        response.write(json.encode({
-          "jsonrpc": "2.0",
-          "result": {"message": "Command executed successfully via native Dart worker"},
-          "id": 1
-        }));
-      } else if (request.method == 'POST' && request.uri.path == '/api/plugins/save') {
-        response.headers.contentType = ContentType.json;
-        final content = await utf8.decoder.bind(request).join();
-        final data = json.decode(content);
-        
-        final String filename = data['name'] ?? 'plugin.lua';
-        final String luaCode = data['code'] ?? '';
-        
-        if (!filename.endsWith('.lua') || filename.contains('..')) {
-          response.statusCode = HttpStatus.badRequest;
-          response.write(json.encode({'status': 'error', 'message': 'Invalid filename'}));
-          return;
-        }
-        
-        final appDir = await getApplicationDocumentsDirectory();
-        final pluginDir = Directory('${appDir.path}/plugins');
-        if (!await pluginDir.exists()) {
-          await pluginDir.create(recursive: true);
-        }
-        
-        final file = File('${pluginDir.path}/$filename');
-        await file.writeAsString(luaCode);
-
-        // Execute dynamic search test upon save via FFI Engine
-        final executionResult = _luaEngine.search(luaCode, "test_query");
-
-        // Trigger native Android Toast confirmation on the TV display
-        await ToastHelper.showToast('Lua Plugin $filename Deployed Successfully!');
-
-        response.statusCode = HttpStatus.ok;
-        response.write(json.encode({
-          'status': 'success',
-          'message': 'Plugin $filename deployed successfully to TV storage',
-          'path': file.path,
-          'engine_status': executionResult,
-        }));
-      } else {
-        response.headers.contentType = ContentType.json;
-        response.statusCode = HttpStatus.notFound;
-        response.write(json.encode({"error": "Endpoint not found"}));
-      }
-    } catch (e) {
-      response.headers.contentType = ContentType.json;
-      response.statusCode = HttpStatus.internalServerError;
-      response.write(json.encode({"error": e.toString()}));
-    } finally {
-      await response.close();
-    }
-  }
-
-  void _triggerFallback(String reason) {
-    setState(() {
-      _isServerActive = false;
-      _statusMessage = "Fallback Active: $reason Local media UI remains fully operational.";
-      _isChecking = false;
-      _isBooting = false;
-    });
-  }
+  final int _port = 9090;
 
   @override
   Widget build(BuildContext context) {
+    final bool isServerActive = MeshBackgroundService().isRunning;
+
     return Padding(
       padding: const EdgeInsets.all(40.0),
       child: Column(
@@ -311,7 +299,7 @@ class _MeshServerScreenState extends State<MeshServerScreen> {
           ),
           const SizedBox(height: 12),
           const Text(
-            'Monitors background native Dart server & serves the remote Lua plugin editor UI.',
+            'Runs persistently in the background. Serves the remote Lua plugin editor UI across the mesh.',
             style: TextStyle(color: Colors.white70, fontSize: 14),
           ),
           const SizedBox(height: 32),
@@ -323,25 +311,23 @@ class _MeshServerScreenState extends State<MeshServerScreen> {
                   color: const Color(0xFF1E1E1E),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
-                    color: _isServerActive ? Colors.greenAccent.withOpacity(0.5) : Colors.orangeAccent.withOpacity(0.5),
+                    color: isServerActive ? Colors.greenAccent.withOpacity(0.5) : Colors.orangeAccent.withOpacity(0.5),
                     width: 2,
                   ),
                 ),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    _isChecking
-                        ? const CircularProgressIndicator(color: Colors.blueAccent)
-                        : Icon(
-                            _isServerActive ? Icons.check_circle : Icons.warning_amber_rounded,
-                            color: _isServerActive ? Colors.greenAccent : Colors.orangeAccent,
-                            size: 48,
-                          ),
+                    Icon(
+                      isServerActive ? Icons.check_circle : Icons.warning_amber_rounded,
+                      color: isServerActive ? Colors.greenAccent : Colors.orangeAccent,
+                      size: 48,
+                    ),
                     const SizedBox(height: 16),
                     Text(
-                      _isServerActive ? 'STATUS: ONLINE (MESH SECURED)' : 'STATUS: FALLBACK / STANDALONE',
+                      isServerActive ? 'STATUS: GLOBAL BACKGROUND RUNNING' : 'STATUS: OFFLINE',
                       style: TextStyle(
-                        color: _isServerActive ? Colors.greenAccent : Colors.orangeAccent,
+                        color: isServerActive ? Colors.greenAccent : Colors.orangeAccent,
                         fontSize: 14,
                         fontWeight: FontWeight.bold,
                       ),
@@ -361,20 +347,12 @@ class _MeshServerScreenState extends State<MeshServerScreen> {
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text(
-                        _statusMessage,
+                        isServerActive 
+                            ? "Mesh server is actively listening globally. You can safely navigate away from this screen." 
+                            : "Server failed to bind. Check port configuration.",
                         textAlign: TextAlign.center,
                         style: const TextStyle(color: Colors.white70, fontSize: 13),
                       ),
-                    ),
-                    const SizedBox(height: 24),
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.blue.shade700,
-                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                      ),
-                      onPressed: (_isChecking || _isBooting) ? null : _startNativeServerAndVerify,
-                      icon: const Icon(Icons.refresh),
-                      label: const Text('Restart & Re-verify Server'),
                     ),
                   ],
                 ),
@@ -402,11 +380,29 @@ class _LibraryScreenState extends State<LibraryScreen> {
   String? _activeCatalogUrl;
 
   final String masterIndexUrl = 'https://jch0029987-glitch.github.io/media-client-backend/addons.json';
+  late final LibraryPluginProvider _pluginProvider;
 
   @override
   void initState() {
     super.initState();
+    _pluginProvider = LibraryPluginProvider();
+    _pluginProvider.addListener(_onPluginCatalogUpdated);
     _fetchMasterIndex();
+  }
+
+  @override
+  void dispose() {
+    _pluginProvider.removeListener(_onPluginCatalogUpdated);
+    super.dispose();
+  }
+
+  void _onPluginCatalogUpdated() {
+    if (_pluginProvider.dynamicCatalogItems.isNotEmpty) {
+      setState(() {
+        _currentCatalogItems = _pluginProvider.dynamicCatalogItems;
+        _isLoading = false;
+      });
+    }
   }
 
   Future<void> _fetchMasterIndex() async {
@@ -541,7 +537,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                                       child: Padding(
                                         padding: const EdgeInsets.all(12.0),
                                         child: Text(
-                                          item['title'] ?? 'Unknown Item',
+                                          item['title'] ?? item['name'] ?? 'Unknown Item',
                                           textAlign: TextAlign.center,
                                           style: const TextStyle(fontSize: 16, color: Colors.white, fontWeight: FontWeight.bold),
                                         ),
