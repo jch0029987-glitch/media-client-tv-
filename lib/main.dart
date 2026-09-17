@@ -8,13 +8,13 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 
-// Define C function signature mapping for LuaJIT FFI
-typedef EvalLuaC = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> scriptContent);
-typedef EvalLuaDart = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> scriptContent);
+// Define C function signature mapping for dynamic Lua search FFI
+typedef CallLuaSearchC = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> scriptContent, ffi.Pointer<Utf8> queryTerm);
+typedef CallLuaSearchDart = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> scriptContent, ffi.Pointer<Utf8> queryTerm);
 
 class LuaJitEngine {
   late final ffi.DynamicLibrary _lib;
-  late final EvalLuaDart _evalLua;
+  late final CallLuaSearchDart _callSearch;
   bool _initialized = false;
 
   void initialize() {
@@ -25,8 +25,8 @@ class LuaJitEngine {
           ? ffi.DynamicLibrary.open('libluajit.so')
           : ffi.DynamicLibrary.process();
 
-      _evalLua = _lib
-          .lookup<ffi.NativeFunction<EvalLuaC>>('eval_lua_script')
+      _callSearch = _lib
+          .lookup<ffi.NativeFunction<CallLuaSearchC>>('call_lua_search')
           .asFunction();
 
       _initialized = true;
@@ -35,20 +35,22 @@ class LuaJitEngine {
     }
   }
 
-  String runScript(String scriptContent) {
+  String search(String scriptContent, String queryTerm) {
     if (!_initialized) initialize();
     
     // Fallback handler if library isn't loaded in test/desktop environment
     if (!_initialized) {
-      return "LuaJIT Standalone Mock: $scriptContent";
+      return '{"status": "mock", "query": "$queryTerm", "items": []}';
     }
 
     final scriptPtr = scriptContent.toNativeUtf8();
+    final queryPtr = queryTerm.toNativeUtf8();
     try {
-      final resultPtr = _evalLua(scriptPtr);
+      final resultPtr = _callSearch(scriptPtr, queryPtr);
       return resultPtr.toDartString();
     } finally {
       calloc.free(scriptPtr);
+      calloc.free(queryPtr);
     }
   }
 }
@@ -247,8 +249,8 @@ class _MeshServerScreenState extends State<MeshServerScreen> {
         final file = File('${pluginDir.path}/$filename');
         await file.writeAsString(luaCode);
 
-        // Execute via LuaJIT FFI Engine
-        final executionResult = _luaEngine.runScript(luaCode);
+        // Execute dynamic search test upon save via FFI Engine
+        final executionResult = _luaEngine.search(luaCode, "test_query");
 
         response.statusCode = HttpStatus.ok;
         response.write(json.encode({
