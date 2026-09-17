@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:xml/xml.dart' as xml;
 
 // Define C function signature mapping for dynamic Lua search FFI
@@ -162,6 +163,41 @@ class SkinManager extends ChangeNotifier {
   }
 }
 
+/// Persistent Reactive Settings Manager Provider
+class SettingsManager extends ChangeNotifier {
+  static final SettingsManager _instance = SettingsManager._internal();
+  factory SettingsManager() => _instance;
+  SettingsManager._internal();
+
+  Map<String, dynamic> _customSettings = {};
+  Map<String, dynamic> get customSettings => _customSettings;
+
+  Future<void> loadSavedSettings() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final String? savedJson = prefs.getString('mesh_custom_settings');
+      if (savedJson != null) {
+        _customSettings = json.decode(savedJson);
+        notifyListeners();
+      }
+    } catch (e) {
+      print("Failed to load saved settings: $e");
+    }
+  }
+
+  Future<void> updateSettings(Map<String, dynamic> newSettings) async {
+    _customSettings = newSettings;
+    notifyListeners();
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('mesh_custom_settings', json.encode(newSettings));
+    } catch (e) {
+      print("Failed to persist settings: $e");
+    }
+  }
+}
+
 /// Reactive State Manager for Dynamic Plugin Catalog Ingestion
 class LibraryPluginProvider extends ChangeNotifier {
   static final LibraryPluginProvider _instance = LibraryPluginProvider._internal();
@@ -258,12 +294,21 @@ class MeshBackgroundService {
         final file = File('${skinDir.path}/$filename');
         await file.writeAsString(xmlCode);
 
-        // Apply UI Skin Rewrite instantly
         SkinManager().applySkinXml(xmlCode);
         await ToastHelper.showToast('Kodi Skin $filename Applied!');
 
         response.statusCode = HttpStatus.ok;
         response.write(json.encode({'status': 'success', 'path': file.path}));
+      } else if (request.method == 'POST' && request.uri.path == '/api/settings/save') {
+        response.headers.contentType = ContentType.json;
+        final content = await utf8.decoder.bind(request).join();
+        final data = json.decode(content);
+        
+        await SettingsManager().updateSettings(data);
+        await ToastHelper.showToast('Settings Updated via Mesh Web UI!');
+
+        response.statusCode = HttpStatus.ok;
+        response.write(json.encode({'status': 'success'}));
       } else if (request.method == 'POST' && request.uri.path == '/api/system/toast') {
         response.headers.contentType = ContentType.json;
         final content = await utf8.decoder.bind(request).join();
@@ -290,6 +335,7 @@ class MeshBackgroundService {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await SettingsManager().loadSavedSettings();
   await MeshBackgroundService().startServer();
   runApp(const MediaClientApp());
 }
@@ -681,19 +727,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      listenable: SkinManager(),
+      listenable: Listenable.merge([SkinManager(), SettingsManager()]),
       builder: (context, _) {
         final skin = SkinManager().currentSkin;
+        final customSettings = SettingsManager().customSettings;
+
         return Padding(
           padding: EdgeInsets.all(skin.contentPadding),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          child: ListView(
             children: [
               Text(
                 'Settings & System Updates',
                 style: TextStyle(fontSize: skin.headerFontSize, fontWeight: FontWeight.bold, color: skin.textPrimaryColor),
               ),
-              const SizedBox(height: 32),
+              const SizedBox(height: 24),
+              if (customSettings.isNotEmpty) ...[
+                Text('Dynamic Web Settings', style: TextStyle(color: skin.primaryColor, fontWeight: FontWeight.bold, fontSize: 18)),
+                const SizedBox(height: 12),
+                ...customSettings.entries.map((entry) => Card(
+                  color: skin.cardBackgroundColor,
+                  margin: const EdgeInsets.only(bottom: 12),
+                  child: ListTile(
+                    title: Text(entry.key, style: TextStyle(color: skin.textPrimaryColor, fontWeight: FontWeight.bold)),
+                    subtitle: Text('${entry.value}', style: TextStyle(color: skin.textSecondaryColor)),
+                  ),
+                )),
+                const Divider(height: 32),
+              ],
               ElevatedButton(
                 style: ElevatedButton.styleFrom(
                   backgroundColor: skin.primaryColor,
