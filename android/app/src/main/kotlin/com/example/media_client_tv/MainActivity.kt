@@ -2,6 +2,7 @@ package com.example.media_client_tv
 
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -14,16 +15,24 @@ class MainActivity: FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
-            if (call.method == "installApk") {
-                val path = call.argument<String>("path")
-                if (path != null) {
-                    installApk(path)
-                    result.success(true)
-                } else {
-                    result.error("INVALID_PATH", "APK path is null", null)
+            when (call.method) {
+                "installApk" -> {
+                    val path = call.argument<String>("path")
+                    if (path != null) {
+                        installApk(path)
+                        result.success(true)
+                    } else {
+                        result.error("INVALID_PATH", "APK path is null", null)
+                    }
                 }
-            } else {
-                result.notImplemented()
+                "showToast" -> {
+                    val message = call.argument<String>("message") ?: "Action completed"
+                    Toast.makeText(applicationContext, message, Toast.LENGTH_SHORT).show()
+                    result.success(true)
+                }
+                else -> {
+                    result.notImplemented()
+                }
             }
         }
     }
