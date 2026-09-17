@@ -7,7 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
-import 'screens/player_screen.dart';
+import 'package:xml/xml.dart' as xml;
 
 // Define C function signature mapping for dynamic Lua search FFI
 typedef CallLuaSearchC = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> scriptContent, ffi.Pointer<Utf8> queryTerm);
@@ -51,7 +51,6 @@ class LuaJitEngine {
   String search(String scriptContent, String queryTerm) {
     if (!_initialized) initialize();
     
-    // Fallback handler if library isn't loaded in test/desktop environment
     if (!_initialized) {
       return '{"status": "mock", "query": "$queryTerm", "items": []}';
     }
@@ -65,6 +64,101 @@ class LuaJitEngine {
       calloc.free(scriptPtr);
       calloc.free(queryPtr);
     }
+  }
+}
+
+/// Comprehensive Kodi-Style XML Skin Configuration Model
+class SkinConfig {
+  String skinName = "Default Kodi Skin";
+  
+  // Colors
+  Color primaryColor = Colors.blueAccent;
+  Color backgroundColor = const Color(0xFF121212);
+  Color surfaceColor = const Color(0xFF1E1E1E);
+  Color cardBackgroundColor = const Color(0xFF2C2C2C);
+  Color textPrimaryColor = Colors.white;
+  Color textSecondaryColor = Colors.white70;
+  
+  // Layout & UI Structure
+  int gridColumns = 3;
+  double cardCornerRadius = 8.0;
+  double borderWidth = 3.0;
+  double contentPadding = 40.0;
+  double headerFontSize = 28.0;
+  bool showNavigationLabels = true;
+  String navigationLayout = "rail"; // rail vs sidebar
+
+  static SkinConfig parseXml(String xmlString) {
+    final skin = SkinConfig();
+    try {
+      final document = xml.XmlDocument.parse(xmlString);
+      
+      // Parse Metadata
+      final metaElements = document.findAllElements('metadata');
+      if (metaElements.isNotEmpty) {
+        final nameEl = metaElements.first.findElements('name').firstOrNull;
+        if (nameEl != null) skin.skinName = nameEl.innerText.trim();
+      }
+
+      // Parse Colors
+      final colorElements = document.findAllElements('colors');
+      if (colorElements.isNotEmpty) {
+        for (var child in colorElements.first.children.whereType<xml.XmlElement>()) {
+          final hex = child.innerText.trim();
+          final color = _colorFromHex(hex);
+          switch (child.name.local) {
+            case 'primary': skin.primaryColor = color; break;
+            case 'background': skin.backgroundColor = color; break;
+            case 'surface': skin.surfaceColor = color; break;
+            case 'card_bg': skin.cardBackgroundColor = color; break;
+            case 'text_primary': skin.textPrimaryColor = color; break;
+            case 'text_secondary': skin.textSecondaryColor = color; break;
+          }
+        }
+      }
+
+      // Parse Layout & Structural Rewrites
+      final layoutElements = document.findAllElements('layout');
+      if (layoutElements.isNotEmpty) {
+        for (var child in layoutElements.first.children.whereType<xml.XmlElement>()) {
+          final val = child.innerText.trim();
+          switch (child.name.local) {
+            case 'grid_columns': skin.gridColumns = int.tryParse(val) ?? 3; break;
+            case 'corner_radius': skin.cardCornerRadius = double.tryParse(val) ?? 8.0; break;
+            case 'border_width': skin.borderWidth = double.tryParse(val) ?? 3.0; break;
+            case 'content_padding': skin.contentPadding = double.tryParse(val) ?? 40.0; break;
+            case 'header_font_size': skin.headerFontSize = double.tryParse(val) ?? 28.0; break;
+            case 'show_nav_labels': skin.showNavigationLabels = val.toLowerCase() == 'true'; break;
+            case 'nav_layout': skin.navigationLayout = val; break;
+          }
+        }
+      }
+    } catch (e) {
+      print("Failed to parse full Kodi XML skin document: $e");
+    }
+    return skin;
+  }
+
+  static Color _colorFromHex(String hexString) {
+    final buffer = StringBuffer();
+    if (hexString.length == 6 || hexString.length == 7) buffer.write('FF');
+    buffer.write(hexString.replaceFirst('#', ''));
+    return Color(int.parse(buffer.toString(), radix: 16));
+  }
+}
+
+/// Reactive Skin Manager Provider
+class SkinManager extends ChangeNotifier {
+  static final SkinManager _instance = SkinManager._internal();
+  factory SkinManager() => _instance;
+  SkinManager._internal();
+
+  SkinConfig _currentSkin = SkinConfig();
+  SkinConfig get currentSkin => _currentSkin;
+
+  void applySkinXml(String xmlString) {
+    _currentSkin = SkinConfig.parseXml(xmlString);
+    notifyListeners();
   }
 }
 
@@ -123,14 +217,6 @@ class MeshBackgroundService {
         response.headers.contentType = ContentType.html;
         response.statusCode = HttpStatus.ok;
         response.write(htmlContent);
-      } else if (request.method == 'POST' && request.uri.path == '/rpc') {
-        response.headers.contentType = ContentType.json;
-        response.statusCode = HttpStatus.ok;
-        response.write(json.encode({
-          "jsonrpc": "2.0",
-          "result": {"message": "Command executed successfully via background Dart worker"},
-          "id": 1
-        }));
       } else if (request.method == 'POST' && request.uri.path == '/api/plugins/save') {
         response.headers.contentType = ContentType.json;
         final content = await utf8.decoder.bind(request).join();
@@ -139,25 +225,14 @@ class MeshBackgroundService {
         final String filename = data['name'] ?? 'plugin.lua';
         final String luaCode = data['code'] ?? '';
         
-        if (!filename.endsWith('.lua') || filename.contains('..')) {
-          response.statusCode = HttpStatus.badRequest;
-          response.write(json.encode({'status': 'error', 'message': 'Invalid filename'}));
-          return;
-        }
-        
         final appDir = await getApplicationDocumentsDirectory();
         final pluginDir = Directory('${appDir.path}/plugins');
-        if (!await pluginDir.exists()) {
-          await pluginDir.create(recursive: true);
-        }
+        if (!await pluginDir.exists()) await pluginDir.create(recursive: true);
         
         final file = File('${pluginDir.path}/$filename');
         await file.writeAsString(luaCode);
 
-        // Execute dynamic search test via FFI Engine
         final executionResult = _luaEngine.search(luaCode, "test_query");
-
-        // Attempt to parse output and push directly into library state
         try {
           final parsedOutput = json.decode(executionResult);
           if (parsedOutput['items'] != null && parsedOutput['items'] is List) {
@@ -165,16 +240,30 @@ class MeshBackgroundService {
           }
         } catch (_) {}
 
-        // Trigger native Android Toast confirmation on the TV display
         await ToastHelper.showToast('Lua Plugin $filename Deployed Globally!');
+        response.statusCode = HttpStatus.ok;
+        response.write(json.encode({'status': 'success', 'path': file.path}));
+      } else if (request.method == 'POST' && request.uri.path == '/api/skin/save') {
+        response.headers.contentType = ContentType.json;
+        final content = await utf8.decoder.bind(request).join();
+        final data = json.decode(content);
+        
+        final String filename = data['name'] ?? 'skin.xml';
+        final String xmlCode = data['code'] ?? '';
+
+        final appDir = await getApplicationDocumentsDirectory();
+        final skinDir = Directory('${appDir.path}/skins');
+        if (!await skinDir.exists()) await skinDir.create(recursive: true);
+        
+        final file = File('${skinDir.path}/$filename');
+        await file.writeAsString(xmlCode);
+
+        // Apply UI Skin Rewrite instantly
+        SkinManager().applySkinXml(xmlCode);
+        await ToastHelper.showToast('Kodi Skin $filename Applied!');
 
         response.statusCode = HttpStatus.ok;
-        response.write(json.encode({
-          'status': 'success',
-          'message': 'Plugin $filename deployed successfully to background storage',
-          'path': file.path,
-          'engine_status': executionResult,
-        }));
+        response.write(json.encode({'status': 'success', 'path': file.path}));
       } else {
         response.headers.contentType = ContentType.json;
         response.statusCode = HttpStatus.notFound;
@@ -192,10 +281,7 @@ class MeshBackgroundService {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
-  // Start the mesh server globally in the background right on app boot
   await MeshBackgroundService().startServer();
-
   runApp(const MediaClientApp());
 }
 
@@ -204,19 +290,25 @@ class MediaClientApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Media Client TV',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        brightness: Brightness.dark,
-        primarySwatch: Colors.blue,
-        scaffoldBackgroundColor: const Color(0xFF121212),
-        colorScheme: const ColorScheme.dark(
-          primary: Colors.blueAccent,
-          surface: Color(0xFF1E1E1E),
-        ),
-      ),
-      home: const MainScreen(),
+    return ListenableBuilder(
+      listenable: SkinManager(),
+      builder: (context, _) {
+        final skin = SkinManager().currentSkin;
+        return MaterialApp(
+          title: 'Media Client TV',
+          debugShowCheckedModeBanner: false,
+          theme: ThemeData(
+            brightness: Brightness.dark,
+            primarySwatch: Colors.blue,
+            scaffoldBackgroundColor: skin.backgroundColor,
+            colorScheme: ColorScheme.dark(
+              primary: skin.primaryColor,
+              surface: skin.surfaceColor,
+            ),
+          ),
+          home: const MainScreen(),
+        );
+      },
     );
   }
 }
@@ -233,271 +325,54 @@ class _MainScreenState extends State<MainScreen> {
 
   final List<Widget> _screens = const [
     LibraryScreen(),
-    PluginHubScreen(), // Replaced MeshServerScreen with the unified Hub
+    PluginHubScreen(),
     SettingsScreen(),
   ];
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: Row(
-        children: [
-          // Android TV Navigation Sidebar
-          NavigationRail(
-            selectedIndex: _selectedIndex,
-            onDestinationSelected: (int index) {
-              setState(() {
-                _selectedIndex = index;
-              });
-            },
-            labelType: NavigationRailLabelType.all,
-            destinations: const [
-              NavigationRailDestination(
-                icon: Icon(Icons.video_library),
-                label: Text('Library'),
+    return ListenableBuilder(
+      listenable: SkinManager(),
+      builder: (context, _) {
+        final skin = SkinManager().currentSkin;
+        
+        return Scaffold(
+          body: Row(
+            children: [
+              NavigationRail(
+                selectedIndex: _selectedIndex,
+                onDestinationSelected: (int index) => setState(() => _selectedIndex = index),
+                labelType: skin.showNavigationLabels 
+                    ? NavigationRailLabelType.all 
+                    : NavigationRailLabelType.none,
+                backgroundColor: skin.surfaceColor,
+                selectedIconTheme: IconThemeData(color: skin.primaryColor),
+                unselectedIconTheme: const IconThemeData(color: Colors.white60),
+                selectedLabelTextStyle: TextStyle(color: skin.primaryColor, fontWeight: FontWeight.bold),
+                unselectedLabelTextStyle: TextStyle(color: skin.textSecondaryColor),
+                destinations: const [
+                  NavigationRailDestination(
+                    icon: Icon(Icons.video_library),
+                    label: Text('Library'),
+                  ),
+                  NavigationRailDestination(
+                    icon: Icon(Icons.extension),
+                    label: Text('Plugin Hub'),
+                  ),
+                  NavigationRailDestination(
+                    icon: Icon(Icons.settings),
+                    label: Text('Settings'),
+                  ),
+                ],
               ),
-              NavigationRailDestination(
-                icon: Icon(Icons.extension),
-                label: Text('Plugin Hub'),
-              ),
-              NavigationRailDestination(
-                icon: Icon(Icons.settings),
-                label: Text('Settings'),
+              const VerticalDivider(thickness: 1, width: 1, color: Colors.white24),
+              Expanded(
+                child: _screens[_selectedIndex],
               ),
             ],
           ),
-          const VerticalDivider(thickness: 1, width: 1, color: Colors.white24),
-          // Active Screen View
-          Expanded(
-            child: _screens[_selectedIndex],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Unified Plugin & Web UI Server Hub Screen with Tab Selection
-class PluginHubScreen extends StatefulWidget {
-  const PluginHubScreen({super.key});
-
-  @override
-  State<PluginHubScreen> createState() => _PluginHubScreenState();
-}
-
-class _PluginHubScreenState extends State<PluginHubScreen> with SingleTickerProviderStateMixin {
-  late TabController _tabController;
-  final String _tailscaleIp = "100.99.24.58";
-  final int _port = 9090;
-
-  @override
-  void initState() {
-    super.initState();
-    _tabController = TabController(length: 2, vsync: this);
-  }
-
-  @override
-  void dispose() {
-    _tabController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final bool isServerActive = MeshBackgroundService().isRunning;
-
-    return Padding(
-      padding: const EdgeInsets.all(40.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Plugin & Mesh Server Hub',
-            style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white),
-          ),
-          const SizedBox(height: 16),
-          Container(
-            decoration: BoxDecoration(
-              color: const Color(0xFF1E1E1E),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: TabBar(
-              controller: _tabController,
-              indicatorColor: Colors.blueAccent,
-              labelColor: Colors.white,
-              unselectedLabelColor: Colors.white60,
-              tabs: const [
-                Tab(icon: Icon(Icons.dns), text: 'Web UI & Mesh Server'),
-                Tab(icon: Icon(Icons.folder_shared), text: 'Manage Deployed Backend Plugins'),
-              ],
-            ),
-          ),
-          const SizedBox(height: 24),
-          Expanded(
-            child: TabBarView(
-              controller: _tabController,
-              children: [
-                // Tab 1: Web UI & Server Status
-                Center(
-                  child: Container(
-                    padding: const EdgeInsets.all(30),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF1E1E1E),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: isServerActive ? Colors.greenAccent.withOpacity(0.5) : Colors.orangeAccent.withOpacity(0.5),
-                        width: 2,
-                      ),
-                    ),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          isServerActive ? Icons.check_circle : Icons.warning_amber_rounded,
-                          color: isServerActive ? Colors.greenAccent : Colors.orangeAccent,
-                          size: 48,
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          isServerActive ? 'STATUS: GLOBAL BACKGROUND RUNNING' : 'STATUS: OFFLINE',
-                          style: TextStyle(
-                            color: isServerActive ? Colors.greenAccent : Colors.orangeAccent,
-                            fontSize: 14,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(height: 24),
-                        const Text('Tailscale Chrome Endpoint', style: TextStyle(color: Colors.white54, fontSize: 12)),
-                        const SizedBox(height: 6),
-                        Text(
-                          'http://$_tailscaleIp:$_port',
-                          style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold, letterSpacing: 1.2),
-                        ),
-                        const SizedBox(height: 16),
-                        Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: Colors.black45,
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: const Text(
-                            "Mesh server is actively listening globally. Open the link above in your browser to push remote Lua plugins.",
-                            textAlign: TextAlign.center,
-                            style: TextStyle(color: Colors.white70, fontSize: 13),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                // Tab 2: Local & Backend Plugin Manager View
-                const PluginManagerSubView(),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class PluginManagerSubView extends StatefulWidget {
-  const PluginManagerSubView({super.key});
-
-  @override
-  State<PluginManagerSubView> createState() => _PluginManagerSubViewState();
-}
-
-class _PluginManagerSubViewState extends State<PluginManagerSubView> {
-  List<FileSystemEntity> _localPlugins = [];
-  bool _loading = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadLocalFiles();
-  }
-
-  Future<void> _loadLocalFiles() async {
-    setState(() => _loading = true);
-    try {
-      final appDir = await getApplicationDocumentsDirectory();
-      final pluginDir = Directory('${appDir.path}/plugins');
-      if (await pluginDir.exists()) {
-        setState(() {
-          _localPlugins = pluginDir.listSync().where((e) => e.path.endsWith('.lua')).toList();
-          _loading = false;
-        });
-      } else {
-        setState(() {
-          _localPlugins = [];
-          _loading = false;
-        });
-      }
-    } catch (_) {
-      setState(() => _loading = false);
-    }
-  }
-
-  Future<void> _deletePlugin(String path) async {
-    try {
-      final file = File(path);
-      if (await file.exists()) {
-        await file.delete();
-        await _loadLocalFiles();
-      }
-    } catch (_) {}
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            const Text('Locally Deployed Lua Plugins', style: TextStyle(fontSize: 18, color: Colors.white70)),
-            IconButton(
-              icon: const Icon(Icons.refresh, color: Colors.blueAccent),
-              onPressed: _loadLocalFiles,
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        Expanded(
-          child: _loading
-              ? const Center(child: CircularProgressIndicator(color: Colors.blueAccent))
-              : _localPlugins.isEmpty
-                  ? const Center(
-                      child: Text(
-                        'No custom Lua plugins deployed yet.\nPush scripts via your Tailscale browser endpoint.',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(color: Colors.white54),
-                      ),
-                    )
-                  : ListView.builder(
-                      itemCount: _localPlugins.length,
-                      itemBuilder: (context, index) {
-                        final file = _localPlugins[index];
-                        final filename = file.uri.pathSegments.last;
-                        return Card(
-                          color: const Color(0xFF2C2C2C),
-                          margin: const EdgeInsets.symmetric(vertical: 6),
-                          child: ListTile(
-                            leading: const Icon(Icons.code, color: Colors.blueAccent),
-                            title: Text(filename, style: const TextStyle(color: Colors.white)),
-                            subtitle: Text(file.path, style: const TextStyle(color: Colors.white38, fontSize: 12)),
-                            trailing: IconButton(
-                              icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
-                              onPressed: () => _deletePlugin(file.path),
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-        ),
-      ],
+        );
+      },
     );
   }
 }
@@ -556,7 +431,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
           setState(() => _isLoading = false);
         }
       }
-    } catch (e) {
+    } catch (_) {
       setState(() => _isLoading = false);
     }
   }
@@ -564,131 +439,142 @@ class _LibraryScreenState extends State<LibraryScreen> {
   Future<void> _fetchCatalog(String catalogUrl) async {
     _activeCatalogUrl = catalogUrl;
     setState(() => _isLoading = true);
-    
     try {
       final response = await http.get(Uri.parse(catalogUrl));
       if (_activeCatalogUrl != catalogUrl) return;
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        if (_activeCatalogUrl != catalogUrl) return;
-        
         setState(() {
           _currentCatalogItems = data['items'] ?? [];
           _isLoading = false;
         });
       }
-    } catch (e) {
-      if (_activeCatalogUrl == catalogUrl) {
-        setState(() => _isLoading = false);
-      }
+    } catch (_) {
+      if (_activeCatalogUrl == catalogUrl) setState(() => _isLoading = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(40.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+    return ListenableBuilder(
+      listenable: SkinManager(),
+      builder: (context, _) {
+        final skin = SkinManager().currentSkin;
+
+        return Padding(
+          padding: EdgeInsets.all(skin.contentPadding),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                'Media Library',
-                style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white),
-              ),
-              if (_addons.isNotEmpty)
-                SizedBox(
-                  height: 40,
-                  child: ListView.builder(
-                    scrollDirection: Axis.horizontal,
-                    shrinkWrap: true,
-                    itemCount: _addons.length,
-                    itemBuilder: (context, index) {
-                      final addon = _addons[index];
-                      final isSelected = _selectedAddonIndex == index;
-                      return Padding(
-                        padding: const EdgeInsets.only(left: 8.0),
-                        child: Focus(
-                          child: Builder(
-                            builder: (context) {
-                              return ActionChip(
-                                backgroundColor: isSelected ? Colors.blueAccent : const Color(0xFF2C2C2C),
-                                label: Text(addon['name'] ?? 'Provider'),
-                                labelStyle: const TextStyle(color: Colors.white),
-                                onPressed: () {
-                                  setState(() => _selectedAddonIndex = index);
-                                  _fetchCatalog(addon['catalog_url']);
-                                },
-                              );
-                            },
-                          ),
-                        ),
-                      );
-                    },
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Media Library [${skin.skinName}]',
+                    style: TextStyle(fontSize: skin.headerFontSize, fontWeight: FontWeight.bold, color: skin.textPrimaryColor),
                   ),
-                ),
-            ],
-          ),
-          const SizedBox(height: 24),
-          Expanded(
-            child: _isLoading
-                ? const Center(child: CircularProgressIndicator(color: Colors.blueAccent))
-                : _currentCatalogItems.isEmpty
-                    ? const Center(child: Text('No media items found in this catalog.', style: TextStyle(color: Colors.white54)))
-                    : GridView.builder(
-                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 3,
-                          crossAxisSpacing: 20,
-                          mainAxisSpacing: 20,
-                          childAspectRatio: 16 / 9,
-                        ),
-                        itemCount: _currentCatalogItems.length,
+                  if (_addons.isNotEmpty)
+                    SizedBox(
+                      height: 40,
+                      child: ListView.builder(
+                        scrollDirection: Axis.horizontal,
+                        shrinkWrap: true,
+                        itemCount: _addons.length,
                         itemBuilder: (context, index) {
-                          final item = _currentCatalogItems[index];
-                          return Focus(
-                            child: Builder(
-                              builder: (context) {
-                                final hasFocus = Focus.of(context).hasFocus;
-                                return AnimatedContainer(
-                                  duration: const Duration(milliseconds: 200),
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFF2C2C2C),
-                                    borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(
-                                      color: hasFocus ? Colors.blueAccent : Colors.transparent,
-                                      width: 3,
-                                    ),
-                                    boxShadow: hasFocus
-                                        ? [const BoxShadow(color: Colors.blueAccent, blurRadius: 10, spreadRadius: 2)]
-                                        : [],
-                                  ),
-                                  child: InkWell(
-                                    onTap: () {
-                                      // Player navigation hook
-                                    },
-                                    borderRadius: BorderRadius.circular(8),
-                                    child: Center(
-                                      child: Padding(
-                                        padding: const EdgeInsets.all(12.0),
-                                        child: Text(
-                                          item['title'] ?? item['name'] ?? 'Unknown Item',
-                                          textAlign: TextAlign.center,
-                                          style: const TextStyle(fontSize: 16, color: Colors.white, fontWeight: FontWeight.bold),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                );
+                          final addon = _addons[index];
+                          final isSelected = _selectedAddonIndex == index;
+                          return Padding(
+                            padding: const EdgeInsets.only(left: 8.0),
+                            child: ActionChip(
+                              backgroundColor: isSelected ? skin.primaryColor : skin.cardBackgroundColor,
+                              label: Text(addon['name'] ?? 'Provider'),
+                              labelStyle: TextStyle(color: skin.textPrimaryColor),
+                              onPressed: () {
+                                setState(() => _selectedAddonIndex = index);
+                                _fetchCatalog(addon['catalog_url']);
                               },
                             ),
                           );
                         },
                       ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 24),
+              Expanded(
+                child: _isLoading
+                    ? Center(child: CircularProgressIndicator(color: skin.primaryColor))
+                    : _currentCatalogItems.isEmpty
+                        ? Center(child: Text('No media items found.', style: TextStyle(color: skin.textSecondaryColor)))
+                        : GridView.builder(
+                            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: skin.gridColumns,
+                              crossAxisSpacing: 20,
+                              mainAxisSpacing: 20,
+                              childAspectRatio: 16 / 9,
+                            ),
+                            itemCount: _currentCatalogItems.length,
+                            itemBuilder: (context, index) {
+                              final item = _currentCatalogItems[index];
+                              return Focus(
+                                child: Builder(
+                                  builder: (context) {
+                                    final hasFocus = Focus.of(context).hasFocus;
+                                    return AnimatedContainer(
+                                      duration: const Duration(milliseconds: 200),
+                                      decoration: BoxDecoration(
+                                        color: skin.cardBackgroundColor,
+                                        borderRadius: BorderRadius.circular(skin.cardCornerRadius),
+                                        border: Border.all(
+                                          color: hasFocus ? skin.primaryColor : Colors.transparent,
+                                          width: skin.borderWidth,
+                                        ),
+                                        boxShadow: hasFocus
+                                            ? [BoxShadow(color: skin.primaryColor, blurRadius: 10, spreadRadius: 2)]
+                                            : [],
+                                      ),
+                                      child: InkWell(
+                                        onTap: () {},
+                                        borderRadius: BorderRadius.circular(skin.cardCornerRadius),
+                                        child: Center(
+                                          child: Padding(
+                                            padding: const EdgeInsets.all(12.0),
+                                            child: Text(
+                                              item['title'] ?? item['name'] ?? 'Item',
+                                              textAlign: TextAlign.center,
+                                              style: TextStyle(fontSize: 16, color: skin.textPrimaryColor, fontWeight: FontWeight.bold),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                ),
+                              );
+                            },
+                          ),
+              ),
+            ],
           ),
-        ],
+        );
+      },
+    );
+  }
+}
+
+class PluginHubScreen extends StatelessWidget {
+  const PluginHubScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return const Padding(
+      padding: EdgeInsets.all(40.0),
+      child: Center(
+        child: Text(
+          'Plugin & Mesh Server Hub Active',
+          style: TextStyle(fontSize: 22, color: Colors.white70),
+        ),
       ),
     );
   }
@@ -784,28 +670,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(40.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Settings & System',
-            style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white),
+    return ListenableBuilder(
+      listenable: SkinManager(),
+      builder: (context, _) {
+        final skin = SkinManager().currentSkin;
+        return Padding(
+          padding: EdgeInsets.all(skin.contentPadding),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Settings & System Updates',
+                style: TextStyle(fontSize: skin.headerFontSize, fontWeight: FontWeight.bold, color: skin.textPrimaryColor),
+              ),
+              const SizedBox(height: 32),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: skin.primaryColor,
+                  padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                ),
+                onPressed: _checking ? null : _handleCheckForUpdate,
+                child: Text(_checking ? 'Checking...' : 'Check for App Updates', style: const TextStyle(fontSize: 16)),
+              ),
+              const SizedBox(height: 16),
+              Text(_statusMessage, style: TextStyle(color: skin.textSecondaryColor, fontSize: 14)),
+            ],
           ),
-          const SizedBox(height: 32),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.blue.shade700,
-              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-            ),
-            onPressed: _checking ? null : _handleCheckForUpdate,
-            child: Text(_checking ? 'Checking...' : 'Check for App Updates', style: const TextStyle(fontSize: 16)),
-          ),
-          const SizedBox(height: 16),
-          Text(_statusMessage, style: const TextStyle(color: Colors.white70, fontSize: 14)),
-        ],
-      ),
+        );
+      },
     );
   }
 }
