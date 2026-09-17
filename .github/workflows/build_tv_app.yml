@@ -41,7 +41,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-multilib g++-multilib autoconf automake libtool make
 
-      - name: Build libcurl for armeabi-v7a (Static)
+      - name: Build libcurl for armeabi-v7a (Static with PIC)
         run: |
           echo "Cloning libcurl source..."
           git clone --depth 1 https://github.com/curl/curl.git
@@ -73,7 +73,8 @@ jobs:
                       --disable-rtsp \
                       --disable-smtp \
                       --disable-telnet \
-                      --disable-tftp
+                      --disable-tftp \
+                      CFLAGS="-fPIC"
 
           echo "Compiling libcurl..."
           make -j$(nproc)
@@ -93,7 +94,7 @@ jobs:
           echo "Compiling LuaJIT..."
           make clean
           make HOST_CC="gcc -m32" \
-               STATIC_CC="$TARGET_CC" \
+               STATIC_CC="$TARGET_CC -fPIC" \
                DYNAMIC_CC="$TARGET_CC -fPIC" \
                TARGET_LD="$TARGET_CC" \
                TARGET_AR="$TOOLCHAIN/llvm-ar rcus" \
@@ -113,7 +114,7 @@ jobs:
             curl/dist/lib/libcurl.a \
             LuaJIT/src/libluajit.a \
             -o android/app/src/main/jniLibs/armeabi-v7a/libluajit.so \
-            -llog -lz -lm
+            -llog -lz -lm -latomic
 
           # Verification check
           ls -lh android/app/src/main/jniLibs/armeabi-v7a/libluajit.so
