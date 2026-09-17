@@ -111,6 +111,7 @@ jobs:
 
           echo "Compiling unified native libluajit.so with libcurl HTTP bridge..."
           $TOOLCHAIN/clang --target=armv7a-linux-androideabi21 -shared -fPIC \
+            -std=c11 -Dthread_local=_Thread_local \
             -Icurl/dist/include \
             -ILuaJIT/src \
             android/app/src/main/cpp/bridge.c \
