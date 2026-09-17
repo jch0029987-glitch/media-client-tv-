@@ -113,7 +113,7 @@ jobs:
           $TOOLCHAIN/clang --target=armv7a-linux-androideabi21 -shared -fPIC \
             -Icurl/dist/include \
             -ILuaJIT/src \
-            native/lua_bridge.c \
+            android/app/src/main/cpp/bridge.c \
             curl/dist/lib/libcurl.a \
             LuaJIT/src/libluajit.a \
             -o android/app/src/main/jniLibs/armeabi-v7a/libluajit.so \
