@@ -1,4 +1,4 @@
-name: Build TV App APK
+Name: Build TV App APK
 
 on:
   workflow_dispatch:
@@ -84,7 +84,8 @@ jobs:
         if: ${{ inputs.build_release == true }}
         uses: softprops/action-gh-release@v2
         with:
-          files: build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk
+          files: |
+            build/app/outputs/flutter-apk/*.apk
           tag_name: v1.0.0-${{ github.run_number }}
           name: "Media Client TV v1.0.0-${{ github.run_number }}"
           body: "Automated signed release build for Android TV (Chromecast HD optimized 32-bit armeabi-v7a)."
