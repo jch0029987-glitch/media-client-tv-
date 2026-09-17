@@ -46,16 +46,11 @@ jobs:
           echo "Using Android NDK at: $NDK_PATH"
           
           TOOLCHAIN="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64"
-          
-          export CC="$TOOLCHAIN/bin/clang --target=armv7a-linux-androideabi21"
-          export AR="$TOOLCHAIN/bin/llvm-ar"
-          export STRIP="$TOOLCHAIN/bin/llvm-strip"
-          export LD="$TOOLCHAIN/bin/ld.lld"
 
           echo "Compiling LuaJIT for 32-bit ARM..."
           make clean
           make HOST_CC="gcc" \
-               CROSS="$TOOLCHAIN/bin/" \
+               CROSS="" \
                TARGET_SYS=Linux \
                TARGET_CFLAGS="-fPIC" \
                TARGET_LDFLAGS="-latomic" \
