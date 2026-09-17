@@ -41,7 +41,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-multilib g++-multilib
 
-      - name: Build LuaJIT for armeabi-v7a (Cloud CI)
+      - name: Build LuaJIT for armeabi-v7a (Direct Link)
         run: |
           echo "Cloning LuaJIT source..."
           git clone https://github.com/LuaJIT/LuaJIT.git
@@ -52,20 +52,24 @@ jobs:
           
           TOOLCHAIN="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64"
 
-          echo "Compiling LuaJIT for 32-bit ARM (bypassing host strip collision)..."
+          echo "Building static objects with 32-bit host compiler..."
           make clean
           make HOST_CC="gcc -m32" \
                CROSS="" \
                TARGET_SYS=Linux \
-               TARGET_CFLAGS="-fPIC" \
-               TARGET_LDFLAGS="-latomic" \
                CC="$TOOLCHAIN/bin/clang --target=armv7a-linux-androideabi21" \
                AR="$TOOLCHAIN/bin/llvm-ar rcus" \
-               STRIP="true"
+               BUILDMODE=static
+
+          echo "Manually linking shared library with NDK Clang..."
+          "$TOOLCHAIN/bin/clang" --target=armv7a-linux-androideabi21 -shared -o libluajit.so src/*.o -ldl -lm -latomic
+
+          echo "Stripping symbols safely..."
+          "$TOOLCHAIN/bin/llvm-strip" --strip-unneeded libluajit.so
 
           echo "Moving compiled libluajit.so into Android jniLibs..."
           mkdir -p ../android/app/src/main/jniLibs/armeabi-v7a
-          cp src/libluajit.so ../android/app/src/main/jniLibs/armeabi-v7a/
+          cp libluajit.so ../android/app/src/main/jniLibs/armeabi-v7a/
           cd ..
           
           # Quick verification
