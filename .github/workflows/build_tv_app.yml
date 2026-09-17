@@ -36,24 +36,61 @@ jobs:
           echo "flutter.compileSdkVersion=36" > android/local.properties
           echo "flutter.targetSdkVersion=34" >> android/local.properties
 
-      - name: Install Host Multilib Dependencies
+      - name: Install Host Multilib & Build Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-multilib g++-multilib
+          sudo apt-get install -y gcc-multilib g++-multilib autoconf automake libtool make
 
-      - name: Build LuaJIT for armeabi-v7a (Standard NDK Method)
+      - name: Build libcurl for armeabi-v7a (Static)
+        run: |
+          echo "Cloning libcurl source..."
+          git clone --depth 1 https://github.com/curl/curl.git
+          cd curl
+
+          NDK_PATH=$(find $ANDROID_SDK_ROOT/ndk -maxdepth 1 -mindepth 1 | sort -V | tail -n 1)
+          echo "Using Android NDK at: $NDK_PATH"
+          
+          TOOLCHAIN="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          export CC="$TOOLCHAIN/clang --target=armv7a-linux-androideabi21"
+          export AR="$TOOLCHAIN/llvm-ar"
+          export AS="$TOOLCHAIN/llvm-as"
+          export RANLIB="$TOOLCHAIN/llvm-ranlib"
+          export STRIP="$TOOLCHAIN/llvm-strip"
+
+          echo "Configuring libcurl..."
+          ./buildconf
+          ./configure --host=arm-linux-androideabi \
+                      --prefix=$(pwd)/dist \
+                      --disable-shared \
+                      --enable-static \
+                      --without-ssl \
+                      --disable-ldap \
+                      --disable-dict \
+                      --disable-file \
+                      --disable-gopher \
+                      --disable-imap \
+                      --disable-pop3 \
+                      --disable-rtsp \
+                      --disable-smtp \
+                      --disable-telnet \
+                      --disable-tftp
+
+          echo "Compiling libcurl..."
+          make -j$(nproc)
+          make install
+          cd ..
+
+      - name: Build LuaJIT & Compile HTTP-Enabled Native Bridge
         run: |
           echo "Cloning LuaJIT source..."
           git clone https://github.com/LuaJIT/LuaJIT.git
           cd LuaJIT
 
           NDK_PATH=$(find $ANDROID_SDK_ROOT/ndk -maxdepth 1 -mindepth 1 | sort -V | tail -n 1)
-          echo "Using Android NDK at: $NDK_PATH"
-          
           TOOLCHAIN="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin"
           TARGET_CC="$TOOLCHAIN/clang --target=armv7a-linux-androideabi21"
 
-          echo "Compiling LuaJIT for 32-bit ARM..."
+          echo "Compiling LuaJIT..."
           make clean
           make HOST_CC="gcc -m32" \
                STATIC_CC="$TARGET_CC" \
@@ -63,12 +100,22 @@ jobs:
                TARGET_STRIP="$TOOLCHAIN/llvm-strip" \
                TARGET_SYS=Linux
 
-          echo "Moving compiled libluajit.so into Android jniLibs..."
-          mkdir -p ../android/app/src/main/jniLibs/armeabi-v7a
-          cp src/libluajit.so ../android/app/src/main/jniLibs/armeabi-v7a/
           cd ..
-          
-          # Quick verification
+
+          echo "Preparing jniLibs output directory..."
+          mkdir -p android/app/src/main/jniLibs/armeabi-v7a
+
+          echo "Compiling unified native libluajit.so with libcurl HTTP bridge..."
+          $TOOLCHAIN/clang --target=armv7a-linux-androideabi21 -shared -fPIC \
+            -Icurl/dist/include \
+            -ILuaJIT/src \
+            native/lua_bridge.c \
+            curl/dist/lib/libcurl.a \
+            LuaJIT/src/libluajit.a \
+            -o android/app/src/main/jniLibs/armeabi-v7a/libluajit.so \
+            -llog -lz -lm
+
+          # Verification check
           ls -lh android/app/src/main/jniLibs/armeabi-v7a/libluajit.so
 
       - name: Install Dependencies
@@ -112,9 +159,8 @@ jobs:
         run: |
           TAG_NAME="v1.0.0-${{ github.run_number }}"
           RELEASE_TITLE="Media Client TV v1.0.0-${{ github.run_number }}"
-          RELEASE_NOTES="Automated signed release build for Android TV (Chromecast HD optimized 32-bit armeabi-v7a with LuaJIT)."
+          RELEASE_NOTES="Automated signed release build for Android TV (Chromecast HD optimized 32-bit armeabi-v7a with LuaJIT + libcurl HTTP bridge)."
           
-          # Find the exact built release APK path
           APK_PATH=$(find build/app/outputs/flutter-apk/ -name "app-release.apk" -o -name "*.apk" | head -n 1)
           
           echo "Creating release $TAG_NAME..."
