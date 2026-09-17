@@ -688,7 +688,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                                             Navigator.push(
                                               context,
                                               MaterialPageRoute(
-                                                builder: (context) => PlayerScreen(mediaUrl: url, mediaTitle: title),
+                                                builder: (context) => PlayerScreen(streamUrl: url, title: title),
                                               ),
                                             );
                                           }
