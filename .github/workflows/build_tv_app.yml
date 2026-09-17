@@ -44,8 +44,9 @@ jobs:
       - name: Build libcurl for armeabi-v7a (Static with PIC)
         run: |
           echo "Cloning libcurl source..."
+          rm -rf curl
           git clone --depth 1 https://github.com/curl/curl.git
-          cd curl
+          cd curl || exit 1
 
           NDK_PATH=$(find $ANDROID_SDK_ROOT/ndk -maxdepth 1 -mindepth 1 | sort -V | tail -n 1)
           echo "Using Android NDK at: $NDK_PATH"
@@ -58,7 +59,7 @@ jobs:
           export STRIP="$TOOLCHAIN/llvm-strip"
 
           echo "Configuring libcurl..."
-          ./buildconf
+          autoreconf -fi
           ./configure --host=arm-linux-androideabi \
                       --prefix=$(pwd)/dist \
                       --disable-shared \
@@ -84,8 +85,9 @@ jobs:
       - name: Build LuaJIT & Compile HTTP-Enabled Native Bridge
         run: |
           echo "Cloning LuaJIT source..."
+          rm -rf LuaJIT
           git clone https://github.com/LuaJIT/LuaJIT.git
-          cd LuaJIT
+          cd LuaJIT || exit 1
 
           NDK_PATH=$(find $ANDROID_SDK_ROOT/ndk -maxdepth 1 -mindepth 1 | sort -V | tail -n 1)
           TOOLCHAIN="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin"
