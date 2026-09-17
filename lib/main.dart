@@ -148,7 +148,7 @@ class SkinConfig {
   }
 }
 
-/// Reactive Skin Manager Provider
+/// Persistent Reactive Skin Manager Provider
 class SkinManager extends ChangeNotifier {
   static final SkinManager _instance = SkinManager._internal();
   factory SkinManager() => _instance;
@@ -156,10 +156,34 @@ class SkinManager extends ChangeNotifier {
 
   SkinConfig _currentSkin = SkinConfig();
   SkinConfig get currentSkin => _currentSkin;
+  String _rawXmlPayload = "";
+  String get rawXmlPayload => _rawXmlPayload;
 
-  void applySkinXml(String xmlString) {
+  Future<void> loadSavedSkin() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final String? savedXml = prefs.getString('mesh_active_skin_xml');
+      if (savedXml != null && savedXml.isNotEmpty) {
+        _rawXmlPayload = savedXml;
+        _currentSkin = SkinConfig.parseXml(savedXml);
+        notifyListeners();
+      }
+    } catch (e) {
+      print("Failed to load saved skin: $e");
+    }
+  }
+
+  Future<void> applySkinXml(String xmlString) async {
+    _rawXmlPayload = xmlString;
     _currentSkin = SkinConfig.parseXml(xmlString);
     notifyListeners();
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('mesh_active_skin_xml', xmlString);
+    } catch (e) {
+      print("Failed to persist skin XML: $e");
+    }
   }
 }
 
@@ -198,7 +222,7 @@ class SettingsManager extends ChangeNotifier {
   }
 }
 
-/// Reactive State Manager for Dynamic Plugin Catalog Ingestion
+/// Reactive State Manager for Dynamic Plugin Catalog Ingestion & Loaded Plugins Tracking
 class LibraryPluginProvider extends ChangeNotifier {
   static final LibraryPluginProvider _instance = LibraryPluginProvider._internal();
   factory LibraryPluginProvider() => _instance;
@@ -206,6 +230,15 @@ class LibraryPluginProvider extends ChangeNotifier {
 
   final List<dynamic> _dynamicCatalogItems = [];
   List<dynamic> get dynamicCatalogItems => _dynamicCatalogItems;
+
+  final List<Map<String, String>> _loadedPlugins = [];
+  List<Map<String, String>> get loadedPlugins => _loadedPlugins;
+
+  void registerLoadedPlugin(String name, String code) {
+    _loadedPlugins.removeWhere((p) => p['name'] == name);
+    _loadedPlugins.add({'name': name, 'code': code, 'time': DateTime.now().toIso8601String()});
+    notifyListeners();
+  }
 
   void injectPluginItems(List<dynamic> newItems) {
     _dynamicCatalogItems.clear();
@@ -268,6 +301,9 @@ class MeshBackgroundService {
         final file = File('${pluginDir.path}/$filename');
         await file.writeAsString(luaCode);
 
+        // Register loaded plugin in provider
+        LibraryPluginProvider().registerLoadedPlugin(filename, luaCode);
+
         final executionResult = _luaEngine.search(luaCode, "test_query");
         try {
           final parsedOutput = json.decode(executionResult);
@@ -294,8 +330,8 @@ class MeshBackgroundService {
         final file = File('${skinDir.path}/$filename');
         await file.writeAsString(xmlCode);
 
-        SkinManager().applySkinXml(xmlCode);
-        await ToastHelper.showToast('Kodi Skin $filename Applied!');
+        await SkinManager().applySkinXml(xmlCode);
+        await ToastHelper.showToast('Kodi Skin $filename Applied & Saved!');
 
         response.statusCode = HttpStatus.ok;
         response.write(json.encode({'status': 'success', 'path': file.path}));
@@ -335,6 +371,7 @@ class MeshBackgroundService {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await SkinManager().loadSavedSkin();
   await SettingsManager().loadSavedSettings();
   await MeshBackgroundService().startServer();
   runApp(const MediaClientApp());
@@ -623,15 +660,61 @@ class PluginHubScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Padding(
-      padding: EdgeInsets.all(40.0),
-      child: Center(
-        child: Text(
-          'Plugin & Mesh Server Hub Active\nAccess via http://<DEVICE_IP>:9090',
-          textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 22, color: Colors.white70),
-        ),
-      ),
+    return ListenableBuilder(
+      listenable: Listenable.merge([SkinManager(), LibraryPluginProvider()]),
+      builder: (context, _) {
+        final skin = SkinManager().currentSkin;
+        final loadedPlugins = LibraryPluginProvider().loadedPlugins;
+
+        return Padding(
+          padding: EdgeInsets.all(skin.contentPadding),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Plugin & Mesh Server Hub',
+                style: TextStyle(fontSize: skin.headerFontSize, fontWeight: FontWeight.bold, color: skin.textPrimaryColor),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Access & push Lua plugins or XML skins via http://<DEVICE_IP>:9090',
+                style: TextStyle(fontSize: 16, color: skin.textSecondaryColor),
+              ),
+              const SizedBox(height: 24),
+              Text(
+                'Loaded Active Plugins (${loadedPlugins.length})',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: skin.primaryColor),
+              ),
+              const SizedBox(height: 12),
+              Expanded(
+                child: loadedPlugins.isEmpty
+                    ? Center(
+                        child: Text(
+                          'No plugins loaded yet.\nPush a Lua script from the web mesh UI.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: skin.textSecondaryColor),
+                        ),
+                      )
+                    : ListView.builder(
+                        itemCount: loadedPlugins.length,
+                        itemBuilder: (context, index) {
+                          final plugin = loadedPlugins[index];
+                          return Card(
+                            color: skin.cardBackgroundColor,
+                            margin: const EdgeInsets.only(bottom: 12),
+                            child: ListTile(
+                              leading: Icon(Icons.extension, color: skin.primaryColor),
+                              title: Text(plugin['name'] ?? 'Plugin', style: TextStyle(color: skin.textPrimaryColor, fontWeight: FontWeight.bold)),
+                              subtitle: Text('Deployed: ${plugin['time']}', style: TextStyle(color: skin.textSecondaryColor, fontSize: 12)),
+                            ),
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
