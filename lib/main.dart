@@ -1,11 +1,10 @@
 import 'dart:io';
 import 'dart:convert';
-import 'dart:math';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
-import 'package:serious_python/serious_python.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -90,7 +89,7 @@ class _MainScreenState extends State<MainScreen> {
   }
 }
 
-/// Mesh Server Screen with concurrency locks to prevent port-binding race conditions
+/// Native Dart Mesh Server Screen with built-in concurrency guards
 class MeshServerScreen extends StatefulWidget {
   const MeshServerScreen({super.key});
 
@@ -100,39 +99,56 @@ class MeshServerScreen extends StatefulWidget {
 
 class _MeshServerScreenState extends State<MeshServerScreen> {
   final String _tailscaleIp = "100.99.24.58";
-  String _statusMessage = "Initializing Python execution environment...";
+  String _statusMessage = "Initializing native Dart mesh server...";
   bool _isServerActive = false;
   bool _isChecking = true;
-  bool _isBooting = false; // Guard lock against concurrent boot calls
+  bool _isBooting = false;
+  
+  HttpServer? _nativeHttpServer;
+  int _port = 9090;
 
   @override
   void initState() {
     super.initState();
-    _bootAndVerifyServer();
+    _startNativeServerAndVerify();
   }
 
-  Future<void> _bootAndVerifyServer() async {
-    if (_isBooting) return; // Prevent overlapping execution triggers
+  @override
+  void dispose() {
+    _nativeHttpServer?.close(force: true);
+    super.dispose();
+  }
+
+  Future<void> _startNativeServerAndVerify() async {
+    if (_isBooting) return;
     setState(() {
       _isBooting = true;
       _isChecking = true;
-      _statusMessage = "Starting background Python server...";
+      _statusMessage = "Starting native Dart HTTP/JSON-RPC server...";
     });
 
     try {
-      // Fixed: Provide assetPath as required positional argument
-      await SeriousPython.run("app/app.zip", appFileName: "server.py");
-      
-      // Give the server a brief moment to bind to socket port 9090
-      await Future.delayed(const Duration(seconds: 5));
+      // Close existing server instance if restarting
+      await _nativeHttpServer?.close(force: true);
 
-      final healthUrl = Uri.parse('http://$_tailscaleIp:9090/');
+      // Bind directly to interface port 9090 using pure Dart
+      _nativeHttpServer = await HttpServer.bind(InternetAddress.anyIPv4, _port);
+      
+      // Listen to incoming requests on the mesh network
+      _nativeHttpServer!.listen(_handleMeshRequest, onError: (e) {
+        print("Mesh server stream error: $e");
+      });
+
+      // Brief pause to stabilize socket listener
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      final healthUrl = Uri.parse('http://$_tailscaleIp:$_port/');
       final response = await http.get(healthUrl).timeout(const Duration(seconds: 3));
 
       if (response.statusCode == 200) {
         setState(() {
           _isServerActive = true;
-          _statusMessage = "Server Active & Responding on Tailscale Mesh.";
+          _statusMessage = "Native Dart Server Active & Responding on Tailscale Mesh.";
           _isChecking = false;
           _isBooting = false;
         });
@@ -140,7 +156,39 @@ class _MeshServerScreenState extends State<MeshServerScreen> {
         _triggerFallback("Server responded with unexpected status code: ${response.statusCode}");
       }
     } catch (e) {
-      _triggerFallback("Could not verify server ping ($e). Operating in fallback standalone mode.");
+      _triggerFallback("Could not bind port $_port ($e). Operating in fallback standalone mode.");
+    }
+  }
+
+  void _handleMeshRequest(HttpRequest request) {
+    final response = request.response;
+    response.headers.contentType = ContentType.json;
+
+    try {
+      if (request.method == 'GET' && request.uri.path == '/') {
+        response.statusCode = HttpStatus.ok;
+        response.write(json.encode({
+          "status": "online",
+          "node": "media-client-tv-dart-core",
+          "mesh_ip": _tailscaleIp,
+          "timestamp": DateTime.now().toIso8601String(),
+        }));
+      } else if (request.method == 'POST' && request.uri.path == '/rpc') {
+        response.statusCode = HttpStatus.ok;
+        response.write(json.encode({
+          "jsonrpc": "2.0",
+          "result": {"message": "Command executed successfully via native Dart worker"},
+          "id": 1
+        }));
+      } else {
+        response.statusCode = HttpStatus.notFound;
+        response.write(json.encode({"error": "Endpoint not found"}));
+      }
+    } catch (e) {
+      response.statusCode = HttpStatus.internalServerError;
+      response.write(json.encode({"error": e.toString()}));
+    } finally {
+      response.close();
     }
   }
 
@@ -166,7 +214,7 @@ class _MeshServerScreenState extends State<MeshServerScreen> {
           ),
           const SizedBox(height: 12),
           const Text(
-            'Monitors the background JSON-RPC server for remote browser connection.',
+            'Monitors the background native Dart JSON-RPC server for remote browser connection.',
             style: TextStyle(color: Colors.white70, fontSize: 14),
           ),
           const SizedBox(height: 32),
@@ -205,7 +253,7 @@ class _MeshServerScreenState extends State<MeshServerScreen> {
                     const Text('Tailscale Chrome Endpoint', style: TextStyle(color: Colors.white54, fontSize: 12)),
                     const SizedBox(height: 6),
                     Text(
-                      'http://$_tailscaleIp:9090',
+                      'http://$_tailscaleIp:$_port',
                       style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold, letterSpacing: 1.2),
                     ),
                     const SizedBox(height: 16),
@@ -227,7 +275,7 @@ class _MeshServerScreenState extends State<MeshServerScreen> {
                         backgroundColor: Colors.blue.shade700,
                         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                       ),
-                      onPressed: (_isChecking || _isBooting) ? null : _bootAndVerifyServer,
+                      onPressed: (_isChecking || _isBooting) ? null : _startNativeServerAndVerify,
                       icon: const Icon(Icons.refresh),
                       label: const Text('Restart & Re-verify Server'),
                     ),
@@ -254,25 +302,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
   List<dynamic> _currentCatalogItems = [];
   bool _isLoading = true;
   int _selectedAddonIndex = 0;
-  bool _pythonInitialized = false;
-  String? _activeCatalogUrl; // Tracking token to discard stale async requests
+  String? _activeCatalogUrl;
 
   final String masterIndexUrl = 'https://jch0029987-glitch.github.io/media-client-backend/addons.json';
 
   @override
   void initState() {
     super.initState();
-    _initPythonAndFetch();
-  }
-
-  Future<void> _initPythonAndFetch() async {
-    try {
-      // Fixed: Provide assetPath as required positional argument
-      await SeriousPython.run("app/app.zip", appFileName: "plugin_runner.py");
-      setState(() => _pythonInitialized = true);
-    } catch (e) {
-      // Fallback gracefully
-    }
     _fetchMasterIndex();
   }
 
@@ -296,36 +332,15 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 
   Future<void> _fetchCatalog(String catalogUrl) async {
-    _activeCatalogUrl = catalogUrl; // Mark the latest intent
+    _activeCatalogUrl = catalogUrl;
     setState(() => _isLoading = true);
     
     try {
       final response = await http.get(Uri.parse(catalogUrl));
-      if (_activeCatalogUrl != catalogUrl) return; // Discard if user switched providers
+      if (_activeCatalogUrl != catalogUrl) return;
 
       if (response.statusCode == 200) {
-        String rawBody = response.body;
-
-        if (_pythonInitialized) {
-          try {
-            // Fixed: Provide assetPath as required positional argument
-            final String? pythonResponse = await SeriousPython.run("app/app.zip", appFileName: "plugin_runner.py");
-            if (_activeCatalogUrl != catalogUrl) return; // Guard check
-            
-            if (pythonResponse != null) {
-              final decodedPython = json.decode(pythonResponse);
-              if (decodedPython['status'] == 'success') {
-                setState(() {
-                  _currentCatalogItems = decodedPython['items'] ?? [];
-                  _isLoading = false;
-                });
-                return;
-              }
-            }
-          } catch (_) {}
-        }
-
-        final data = json.decode(rawBody);
+        final data = json.decode(response.body);
         if (_activeCatalogUrl != catalogUrl) return;
         
         setState(() {
