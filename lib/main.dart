@@ -233,7 +233,7 @@ class _MainScreenState extends State<MainScreen> {
 
   final List<Widget> _screens = const [
     LibraryScreen(),
-    MeshServerScreen(),
+    PluginHubScreen(), // Replaced MeshServerScreen with the unified Hub
     SettingsScreen(),
   ];
 
@@ -257,8 +257,8 @@ class _MainScreenState extends State<MainScreen> {
                 label: Text('Library'),
               ),
               NavigationRailDestination(
-                icon: Icon(Icons.dns),
-                label: Text('Mesh RPC'),
+                icon: Icon(Icons.extension),
+                label: Text('Plugin Hub'),
               ),
               NavigationRailDestination(
                 icon: Icon(Icons.settings),
@@ -277,12 +277,30 @@ class _MainScreenState extends State<MainScreen> {
   }
 }
 
-/// Mesh Server Screen displaying global status managed by the background service
-class MeshServerScreen extends StatelessWidget {
-  const MeshServerScreen({super.key});
+/// Unified Plugin & Web UI Server Hub Screen with Tab Selection
+class PluginHubScreen extends StatefulWidget {
+  const PluginHubScreen({super.key});
 
+  @override
+  State<PluginHubScreen> createState() => _PluginHubScreenState();
+}
+
+class _PluginHubScreenState extends State<PluginHubScreen> with SingleTickerProviderStateMixin {
+  late TabController _tabController;
   final String _tailscaleIp = "100.99.24.58";
   final int _port = 9090;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 2, vsync: this);
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -294,73 +312,192 @@ class MeshServerScreen extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'Tailscale Mesh Server Status',
+            'Plugin & Mesh Server Hub',
             style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white),
           ),
-          const SizedBox(height: 12),
-          const Text(
-            'Runs persistently in the background. Serves the remote Lua plugin editor UI across the mesh.',
-            style: TextStyle(color: Colors.white70, fontSize: 14),
+          const SizedBox(height: 16),
+          Container(
+            decoration: BoxDecoration(
+              color: const Color(0xFF1E1E1E),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: TabBar(
+              controller: _tabController,
+              indicatorColor: Colors.blueAccent,
+              labelColor: Colors.white,
+              unselectedLabelColor: Colors.white60,
+              tabs: const [
+                Tab(icon: Icon(Icons.dns), text: 'Web UI & Mesh Server'),
+                Tab(icon: Icon(Icons.folder_shared), text: 'Manage Deployed Backend Plugins'),
+              ],
+            ),
           ),
-          const SizedBox(height: 32),
+          const SizedBox(height: 24),
           Expanded(
-            child: Center(
-              child: Container(
-                padding: const EdgeInsets.all(30),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF1E1E1E),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: isServerActive ? Colors.greenAccent.withOpacity(0.5) : Colors.orangeAccent.withOpacity(0.5),
-                    width: 2,
+            child: TabBarView(
+              controller: _tabController,
+              children: [
+                // Tab 1: Web UI & Server Status
+                Center(
+                  child: Container(
+                    padding: const EdgeInsets.all(30),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1E1E1E),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: isServerActive ? Colors.greenAccent.withOpacity(0.5) : Colors.orangeAccent.withOpacity(0.5),
+                        width: 2,
+                      ),
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          isServerActive ? Icons.check_circle : Icons.warning_amber_rounded,
+                          color: isServerActive ? Colors.greenAccent : Colors.orangeAccent,
+                          size: 48,
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          isServerActive ? 'STATUS: GLOBAL BACKGROUND RUNNING' : 'STATUS: OFFLINE',
+                          style: TextStyle(
+                            color: isServerActive ? Colors.greenAccent : Colors.orangeAccent,
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+                        const Text('Tailscale Chrome Endpoint', style: TextStyle(color: Colors.white54, fontSize: 12)),
+                        const SizedBox(height: 6),
+                        Text(
+                          'http://$_tailscaleIp:$_port',
+                          style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold, letterSpacing: 1.2),
+                        ),
+                        const SizedBox(height: 16),
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.black45,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Text(
+                            "Mesh server is actively listening globally. Open the link above in your browser to push remote Lua plugins.",
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: Colors.white70, fontSize: 13),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      isServerActive ? Icons.check_circle : Icons.warning_amber_rounded,
-                      color: isServerActive ? Colors.greenAccent : Colors.orangeAccent,
-                      size: 48,
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      isServerActive ? 'STATUS: GLOBAL BACKGROUND RUNNING' : 'STATUS: OFFLINE',
-                      style: TextStyle(
-                        color: isServerActive ? Colors.greenAccent : Colors.orangeAccent,
-                        fontSize: 14,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                    const Text('Tailscale Chrome Endpoint', style: TextStyle(color: Colors.white54, fontSize: 12)),
-                    const SizedBox(height: 6),
-                    Text(
-                      'http://$_tailscaleIp:$_port',
-                      style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold, letterSpacing: 1.2),
-                    ),
-                    const SizedBox(height: 16),
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: Colors.black45,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(
-                        isServerActive 
-                            ? "Mesh server is actively listening globally. You can safely navigate away from this screen." 
-                            : "Server failed to bind. Check port configuration.",
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(color: Colors.white70, fontSize: 13),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+                // Tab 2: Local & Backend Plugin Manager View
+                const PluginManagerSubView(),
+              ],
             ),
           ),
         ],
       ),
+    );
+  }
+}
+
+class PluginManagerSubView extends StatefulWidget {
+  const PluginManagerSubView({super.key});
+
+  @override
+  State<PluginManagerSubView> createState() => _PluginManagerSubViewState();
+}
+
+class _PluginManagerSubViewState extends State<PluginManagerSubView> {
+  List<FileSystemEntity> _localPlugins = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadLocalFiles();
+  }
+
+  Future<void> _loadLocalFiles() async {
+    setState(() => _loading = true);
+    try {
+      final appDir = await getApplicationDocumentsDirectory();
+      final pluginDir = Directory('${appDir.path}/plugins');
+      if (await pluginDir.exists()) {
+        setState(() {
+          _localPlugins = pluginDir.listSync().where((e) => e.path.endsWith('.lua')).toList();
+          _loading = false;
+        });
+      } else {
+        setState(() {
+          _localPlugins = [];
+          _loading = false;
+        });
+      }
+    } catch (_) {
+      setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _deletePlugin(String path) async {
+    try {
+      final file = File(path);
+      if (await file.exists()) {
+        await file.delete();
+        await _loadLocalFiles();
+      }
+    } catch (_) {}
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text('Locally Deployed Lua Plugins', style: TextStyle(fontSize: 18, color: Colors.white70)),
+            IconButton(
+              icon: const Icon(Icons.refresh, color: Colors.blueAccent),
+              onPressed: _loadLocalFiles,
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Expanded(
+          child: _loading
+              ? const Center(child: CircularProgressIndicator(color: Colors.blueAccent))
+              : _localPlugins.isEmpty
+                  ? const Center(
+                      child: Text(
+                        'No custom Lua plugins deployed yet.\nPush scripts via your Tailscale browser endpoint.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: Colors.white54),
+                      ),
+                    )
+                  : ListView.builder(
+                      itemCount: _localPlugins.length,
+                      itemBuilder: (context, index) {
+                        final file = _localPlugins[index];
+                        final filename = file.uri.pathSegments.last;
+                        return Card(
+                          color: const Color(0xFF2C2C2C),
+                          margin: const EdgeInsets.symmetric(vertical: 6),
+                          child: ListTile(
+                            leading: const Icon(Icons.code, color: Colors.blueAccent),
+                            title: Text(filename, style: const TextStyle(color: Colors.white)),
+                            subtitle: Text(file.path, style: const TextStyle(color: Colors.white38, fontSize: 12)),
+                            trailing: IconButton(
+                              icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                              onPressed: () => _deletePlugin(file.path),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+        ),
+      ],
     );
   }
 }
