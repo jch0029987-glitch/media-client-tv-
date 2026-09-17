@@ -264,6 +264,15 @@ class MeshBackgroundService {
 
         response.statusCode = HttpStatus.ok;
         response.write(json.encode({'status': 'success', 'path': file.path}));
+      } else if (request.method == 'POST' && request.uri.path == '/api/system/toast') {
+        response.headers.contentType = ContentType.json;
+        final content = await utf8.decoder.bind(request).join();
+        final data = json.decode(content);
+        final String message = data['message'] ?? 'Notification';
+        
+        await ToastHelper.showToast(message);
+        response.statusCode = HttpStatus.ok;
+        response.write(json.encode({'status': 'success'}));
       } else {
         response.headers.contentType = ContentType.json;
         response.statusCode = HttpStatus.notFound;
@@ -572,7 +581,8 @@ class PluginHubScreen extends StatelessWidget {
       padding: EdgeInsets.all(40.0),
       child: Center(
         child: Text(
-          'Plugin & Mesh Server Hub Active',
+          'Plugin & Mesh Server Hub Active\nAccess via http://<DEVICE_IP>:9090',
+          textAlign: TextAlign.center,
           style: TextStyle(fontSize: 22, color: Colors.white70),
         ),
       ),
