@@ -39,11 +39,6 @@ jobs:
       - name: Install Dependencies
         run: flutter pub get
 
-      - name: Package Python Backend with Serious Python
-        run: |
-          # Packages the python files from the 'python_app' folder for Android
-          dart run serious_python:main package python_app -p Android
-
       - name: Prepare Keystore and Signing Properties
         if: ${{ inputs.build_release == true }}
         env:
@@ -61,11 +56,7 @@ jobs:
           EOF
 
       - name: Build APK (Chromecast HD Optimized)
-        env:
-          SERIOUS_PYTHON_SITE_PACKAGES: ${{ github.workspace }}/build/site-packages
         run: |
-          mkdir -p $SERIOUS_PYTHON_SITE_PACKAGES
-          
           # Build target platform explicitly matching the 32-bit architecture needed
           if [ "${{ inputs.build_release }}" == "true" ]; then
             flutter build apk --release --target-platform=android-arm
