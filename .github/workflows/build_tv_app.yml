@@ -105,14 +105,20 @@ jobs:
           path: build/app/outputs/flutter-apk/
           retention-days: 7
 
-      - name: Publish GitHub Release & Upload APK
+      - name: Publish GitHub Release & Upload APK via GH CLI
         if: ${{ inputs.build_release == true }}
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            build/app/outputs/flutter-apk/*.apk
-          tag_name: v1.0.0-${{ github.run_number }}
-          name: "Media Client TV v1.0.0-${{ github.run_number }}"
-          body: "Automated signed release build for Android TV (Chromecast HD optimized 32-bit armeabi-v7a with LuaJIT)."
-          draft: false
-          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG_NAME="v1.0.0-${{ github.run_number }}"
+          RELEASE_TITLE="Media Client TV v1.0.0-${{ github.run_number }}"
+          RELEASE_NOTES="Automated signed release build for Android TV (Chromecast HD optimized 32-bit armeabi-v7a with LuaJIT)."
+          
+          # Find the exact built release APK path
+          APK_PATH=$(find build/app/outputs/flutter-apk/ -name "app-release.apk" -o -name "*.apk" | head -n 1)
+          
+          echo "Creating release $TAG_NAME..."
+          gh release create "$TAG_NAME" \
+            --title "$RELEASE_TITLE" \
+            --notes "$RELEASE_NOTES" \
+            "$APK_PATH"
