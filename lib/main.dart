@@ -13,6 +13,18 @@ import 'screens/player_screen.dart';
 typedef CallLuaSearchC = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> scriptContent, ffi.Pointer<Utf8> queryTerm);
 typedef CallLuaSearchDart = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> scriptContent, ffi.Pointer<Utf8> queryTerm);
 
+class ToastHelper {
+  static const MethodChannel _platform = MethodChannel('com.example.media_client_tv/installer');
+
+  static Future<void> showToast(String message) async {
+    try {
+      await _platform.invokeMethod('showToast', {'message': message});
+    } catch (e) {
+      print("Failed to show toast: $e");
+    }
+  }
+}
+
 class LuaJitEngine {
   late final ffi.DynamicLibrary _lib;
   late final CallLuaSearchDart _callSearch;
@@ -252,6 +264,9 @@ class _MeshServerScreenState extends State<MeshServerScreen> {
 
         // Execute dynamic search test upon save via FFI Engine
         final executionResult = _luaEngine.search(luaCode, "test_query");
+
+        // Trigger native Android Toast confirmation on the TV display
+        await ToastHelper.showToast('Lua Plugin $filename Deployed Successfully!');
 
         response.statusCode = HttpStatus.ok;
         response.write(json.encode({
