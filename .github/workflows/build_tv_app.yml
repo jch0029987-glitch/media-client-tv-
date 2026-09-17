@@ -41,7 +41,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-multilib g++-multilib
 
-      - name: Build LuaJIT for armeabi-v7a (Direct Link)
+      - name: Build LuaJIT for armeabi-v7a (Standard NDK Method)
         run: |
           echo "Cloning LuaJIT source..."
           git clone https://github.com/LuaJIT/LuaJIT.git
@@ -50,26 +50,22 @@ jobs:
           NDK_PATH=$(find $ANDROID_SDK_ROOT/ndk -maxdepth 1 -mindepth 1 | sort -V | tail -n 1)
           echo "Using Android NDK at: $NDK_PATH"
           
-          TOOLCHAIN="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64"
+          TOOLCHAIN="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          TARGET_CC="$TOOLCHAIN/clang --target=armv7a-linux-androideabi21"
 
-          echo "Building static objects with 32-bit host compiler..."
+          echo "Compiling LuaJIT for 32-bit ARM..."
           make clean
           make HOST_CC="gcc -m32" \
-               CROSS="" \
-               TARGET_SYS=Linux \
-               CC="$TOOLCHAIN/bin/clang --target=armv7a-linux-androideabi21" \
-               AR="$TOOLCHAIN/bin/llvm-ar rcus" \
-               BUILDMODE=static
-
-          echo "Manually linking shared library with NDK Clang..."
-          "$TOOLCHAIN/bin/clang" --target=armv7a-linux-androideabi21 -shared -o libluajit.so src/*.o -ldl -lm -latomic
-
-          echo "Stripping symbols safely..."
-          "$TOOLCHAIN/bin/llvm-strip" --strip-unneeded libluajit.so
+               STATIC_CC="$TARGET_CC" \
+               DYNAMIC_CC="$TARGET_CC -fPIC" \
+               TARGET_LD="$TARGET_CC" \
+               TARGET_AR="$TOOLCHAIN/llvm-ar rcus" \
+               TARGET_STRIP="$TOOLCHAIN/llvm-strip" \
+               TARGET_SYS=Linux
 
           echo "Moving compiled libluajit.so into Android jniLibs..."
           mkdir -p ../android/app/src/main/jniLibs/armeabi-v7a
-          cp libluajit.so ../android/app/src/main/jniLibs/armeabi-v7a/
+          cp src/libluajit.so ../android/app/src/main/jniLibs/armeabi-v7a/
           cd ..
           
           # Quick verification
