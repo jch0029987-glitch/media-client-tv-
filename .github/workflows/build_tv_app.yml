@@ -36,6 +36,11 @@ jobs:
           echo "flutter.compileSdkVersion=36" > android/local.properties
           echo "flutter.targetSdkVersion=34" >> android/local.properties
 
+      - name: Install Host Multilib Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib g++-multilib
+
       - name: Build LuaJIT for armeabi-v7a (Cloud CI)
         run: |
           echo "Cloning LuaJIT source..."
@@ -47,9 +52,9 @@ jobs:
           
           TOOLCHAIN="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64"
 
-          echo "Compiling LuaJIT for 32-bit ARM..."
+          echo "Compiling LuaJIT for 32-bit ARM with 32-bit host tools..."
           make clean
-          make HOST_CC="gcc" \
+          make HOST_CC="gcc -m32" \
                CROSS="" \
                TARGET_SYS=Linux \
                TARGET_CFLAGS="-fPIC" \
