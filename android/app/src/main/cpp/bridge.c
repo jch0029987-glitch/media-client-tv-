@@ -62,6 +62,14 @@ static int l_http_get(lua_State *L) {
     curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, (void *)&chunk);
     curl_easy_setopt(curl_handle, CURLOPT_USERAGENT, "MediaClientTV-LuaAgent/1.0");
     curl_easy_setopt(curl_handle, CURLOPT_TIMEOUT, 10L);
+    
+    // Follow HTTP/HTTPS redirects automatically
+    curl_easy_setopt(curl_handle, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl_handle, CURLOPT_MAXREDIRS, 5L);
+
+    // Bypass SSL certificate checks for embedded Android TV environment compatibility
+    curl_easy_setopt(curl_handle, CURLOPT_SSL_VERIFYPEER, 0L);
+    curl_easy_setopt(curl_handle, CURLOPT_SSL_VERIFYHOST, 0L);
 
     res = curl_easy_perform(curl_handle);
 
@@ -164,7 +172,9 @@ EXPORT const char* call_lua_search(const char* script_content, const char* query
 
     // Read the resulting JSON return string from the top of the stack
     const char *result = lua_tostring(L, -1);
-    static thread_local char res_buf[2048];
+    
+    // Expanded to 64KB (65536) to prevent truncating large Invidious JSON payloads
+    static thread_local char res_buf[65536];
     
     if (result) {
         snprintf(res_buf, sizeof(res_buf), "%s", result);
