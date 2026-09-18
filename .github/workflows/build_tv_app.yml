@@ -45,7 +45,7 @@ jobs:
         run: |
           echo "Cloning mbedTLS and libcurl sources..."
           rm -rf mbedtls curl mbedtls_dist
-          git clone --depth 1 --branch v3.6.0 https://github.com/Mbed-TLS/mbedtls.git
+          git clone --depth 1 --branch v3.6.0 --recurse-submodules https://github.com/Mbed-TLS/mbedtls.git
           git clone --depth 1 https://github.com/curl/curl.git
 
           NDK_PATH=$(find $ANDROID_SDK_ROOT/ndk -maxdepth 1 -mindepth 1 | sort -V | tail -n 1)
