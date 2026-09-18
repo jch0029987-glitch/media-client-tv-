@@ -324,13 +324,20 @@ class MeshBackgroundService {
 
         LibraryPluginProvider().registerLoadedPlugin(filename, luaCode);
 
-        final executionResult = _luaEngine.search(luaCode, "test_query");
+        // Safely evaluate Lua script execution without crashing the server thread
         try {
-          final parsedOutput = json.decode(executionResult);
-          if (parsedOutput['items'] != null && parsedOutput['items'] is List) {
-            LibraryPluginProvider().injectPluginItems(parsedOutput['items']);
+          final executionResult = _luaEngine.eval(luaCode);
+          if (executionResult.isNotEmpty && !executionResult.startsWith('Error')) {
+            final parsedOutput = json.decode(executionResult);
+            if (parsedOutput is List) {
+              LibraryPluginProvider().injectPluginItems(parsedOutput);
+            } else if (parsedOutput is Map && parsedOutput['items'] != null) {
+              LibraryPluginProvider().injectPluginItems(parsedOutput['items']);
+            }
           }
-        } catch (_) {}
+        } catch (e) {
+          print("Lua execution evaluation notice: $e");
+        }
 
         await ToastHelper.showToast('Lua Plugin $filename Deployed Globally!');
         response.statusCode = HttpStatus.ok;
