@@ -90,6 +90,11 @@ jobs:
           git clone https://github.com/LuaJIT/LuaJIT.git
           git clone https://github.com/mpx/lua-cjson.git
           
+          # Patch lua-cjson to avoid duplicate static declaration of luaL_setfuncs with LuaJIT
+          cd lua-cjson
+          sed -i '/static void luaL_setfuncs/,/^\}/d' lua_cjson.c
+          cd ..
+
           NDK_PATH=$(find $ANDROID_SDK_ROOT/ndk -maxdepth 1 -mindepth 1 | sort -V | tail -n 1)
           TOOLCHAIN="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin"
           TARGET_CC="$TOOLCHAIN/clang --target=armv7a-linux-androideabi21"
