@@ -85,9 +85,12 @@ static void init_lua_environment(lua_State *L) {
     luaL_openlibs(L);
     lua_register(L, "http_get", l_http_get);
 
-    // Register cjson module so require("cjson") works natively in scripts
-    luaL_requiref(L, "cjson", luaopen_cjson, 1);
-    lua_pop(L, 1); // Remove the module table from the stack
+    // Register cjson into package.preload so require("cjson") works natively in LuaJIT
+    lua_getglobal(L, "package");
+    lua_getfield(L, -1, "preload");
+    lua_pushcfunction(L, luaopen_cjson);
+    lua_setfield(L, -2, "cjson");
+    lua_pop(L, 2); // Remove package and preload tables from the stack
 }
 
 // Original evaluator for direct script execution
