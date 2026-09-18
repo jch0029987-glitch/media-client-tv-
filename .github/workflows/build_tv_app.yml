@@ -13,7 +13,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # Required to create releases and upload assets
+      contents: write
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -58,6 +58,10 @@ jobs:
           export RANLIB="$TOOLCHAIN/llvm-ranlib"
           export STRIP="$TOOLCHAIN/llvm-strip"
 
+          # Define workspace absolute base for distributions
+          WORKSPACE_ROOT="$PWD"
+          MBEDTLS_PREFIX="$WORKSPACE_ROOT/mbedtls_dist"
+
           echo "Compiling mbedTLS statically..."
           cd mbedtls
           mkdir build && cd build
@@ -65,21 +69,23 @@ jobs:
                    -DANDROID_ABI=armeabi-v7a \
                    -DANDROID_PLATFORM=android-21 \
                    -DCMAKE_C_FLAGS="-fPIC" \
-                   -DCMAKE_INSTALL_PREFIX="$(pwd)/../../mbedtls_dist" \
+                   -DCMAKE_INSTALL_PREFIX="$MBEDTLS_PREFIX" \
                    -DENABLE_TESTS=OFF \
                    -DENABLE_PROGRAMS=OFF
           make -j$(nproc)
           make install
-          cd ../../../
+          
+          # Return explicitly to the workspace root
+          cd "$WORKSPACE_ROOT"
 
           echo "Configuring libcurl with mbedTLS..."
           cd curl
           autoreconf -fi
           ./configure --host=arm-linux-androideabi \
-                      --prefix=$(pwd)/dist \
+                      --prefix="$WORKSPACE_ROOT/curl/dist" \
                       --disable-shared \
                       --enable-static \
-                      --with-mbedtls=$(pwd)/../mbedtls_dist \
+                      --with-mbedtls="$MBEDTLS_PREFIX" \
                       --without-libpsl \
                       --disable-ldap \
                       --disable-dict \
@@ -96,10 +102,14 @@ jobs:
           echo "Compiling libcurl..."
           make -j$(nproc)
           make install
-          cd ..
+          
+          # Return explicitly to the workspace root
+          cd "$WORKSPACE_ROOT"
 
       - name: Build LuaJIT, CJSON & Compile Unified Native Bridge
         run: |
+          WORKSPACE_ROOT="$PWD"
+
           echo "Cloning LuaJIT and Lua-CJSON sources..."
           rm -rf LuaJIT lua-cjson
           git clone https://github.com/LuaJIT/LuaJIT.git
@@ -108,7 +118,7 @@ jobs:
           # Patch lua-cjson to avoid duplicate static declaration of luaL_setfuncs with LuaJIT
           cd lua-cjson
           sed -i '/static void luaL_setfuncs/,/^\}/d' lua_cjson.c
-          cd ..
+          cd "$WORKSPACE_ROOT"
 
           NDK_PATH=$(find $ANDROID_SDK_ROOT/ndk -maxdepth 1 -mindepth 1 | sort -V | tail -n 1)
           TOOLCHAIN="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin"
@@ -124,12 +134,12 @@ jobs:
                TARGET_AR="$TOOLCHAIN/llvm-ar rcus" \
                TARGET_STRIP="$TOOLCHAIN/llvm-strip" \
                TARGET_SYS=Linux
-          cd ..
+          cd "$WORKSPACE_ROOT"
 
           echo "Compiling Lua-CJSON object files..."
           cd lua-cjson
           $TARGET_CC -fPIC -O3 -c strbuf.c fpconv.c lua_cjson.c -I../LuaJIT/src
-          cd ..
+          cd "$WORKSPACE_ROOT"
 
           echo "Preparing jniLibs output directory..."
           mkdir -p android/app/src/main/jniLibs/armeabi-v7a
