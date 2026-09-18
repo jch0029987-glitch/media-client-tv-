@@ -86,7 +86,7 @@ jobs:
       - name: Build LuaJIT, CJSON & Compile Unified Native Bridge
         run: |
           echo "Cloning LuaJIT and Lua-CJSON sources..."
-          rm -rf LuaJIT cjson
+          rm -rf LuaJIT lua-cjson
           git clone https://github.com/LuaJIT/LuaJIT.git
           git clone https://github.com/mpx/lua-cjson.git
           
@@ -107,7 +107,7 @@ jobs:
           cd ..
 
           echo "Compiling Lua-CJSON object files..."
-          cd cjson
+          cd lua-cjson
           $TARGET_CC -fPIC -O3 -c strbuf.c fpconv.c lua_cjson.c -I../LuaJIT/src
           cd ..
 
@@ -119,9 +119,9 @@ jobs:
             -std=c11 -Dthread_local=_Thread_local \
             -Icurl/dist/include \
             -ILuaJIT/src \
-            -Icjson \
+            -Ilua-cjson \
             android/app/src/main/cpp/bridge.c \
-            cjson/strbuf.o cjson/fpconv.o cjson/lua_cjson.o \
+            lua-cjson/strbuf.o lua-cjson/fpconv.o lua-cjson/lua_cjson.o \
             curl/dist/lib/libcurl.a \
             LuaJIT/src/libluajit.a \
             -o android/app/src/main/jniLibs/armeabi-v7a/libluajit.so \
