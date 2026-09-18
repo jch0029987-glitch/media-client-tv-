@@ -65,10 +65,11 @@ jobs:
                    -DANDROID_ABI=armeabi-v7a \
                    -DANDROID_PLATFORM=android-21 \
                    -DCMAKE_C_FLAGS="-fPIC" \
+                   -DCMAKE_INSTALL_PREFIX="$(pwd)/../../mbedtls_dist" \
                    -DENABLE_TESTS=OFF \
                    -DENABLE_PROGRAMS=OFF
           make -j$(nproc)
-          make install DESTDIR=$(pwd)/../../mbedtls_dist
+          make install
           cd ../../../
 
           echo "Configuring libcurl with mbedTLS..."
@@ -78,7 +79,7 @@ jobs:
                       --prefix=$(pwd)/dist \
                       --disable-shared \
                       --enable-static \
-                      --with-mbedtls=$(pwd)/../mbedtls_dist/usr/local \
+                      --with-mbedtls=$(pwd)/../mbedtls_dist \
                       --without-libpsl \
                       --disable-ldap \
                       --disable-dict \
@@ -142,9 +143,9 @@ jobs:
             android/app/src/main/cpp/bridge.c \
             lua-cjson/strbuf.o lua-cjson/fpconv.o lua-cjson/lua_cjson.o \
             curl/dist/lib/libcurl.a \
-            mbedtls_dist/usr/local/lib/libmbedtls.a \
-            mbedtls_dist/usr/local/lib/libmbedcrypto.a \
-            mbedtls_dist/usr/local/lib/libmbedx509.a \
+            mbedtls_dist/lib/libmbedtls.a \
+            mbedtls_dist/lib/libmbedcrypto.a \
+            mbedtls_dist/lib/libmbedx509.a \
             LuaJIT/src/libluajit.a \
             -o android/app/src/main/jniLibs/armeabi-v7a/libluajit.so \
             -llog -lz -lm -latomic
