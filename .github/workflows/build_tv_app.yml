@@ -39,14 +39,14 @@ jobs:
       - name: Install Host Multilib & Build Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-multilib g++-multilib autoconf automake libtool make
+          sudo apt-get install -y gcc-multilib g++-multilib autoconf automake libtool make cmake
 
-      - name: Build libcurl for armeabi-v7a (Static with PIC)
+      - name: Build libcurl with mbedTLS for armeabi-v7a (Static with PIC & HTTPS)
         run: |
-          echo "Cloning libcurl source..."
-          rm -rf curl
+          echo "Cloning mbedTLS and libcurl sources..."
+          rm -rf mbedtls curl mbedtls_dist
+          git clone --depth 1 --branch v3.6.0 https://github.com/Mbed-TLS/mbedtls.git
           git clone --depth 1 https://github.com/curl/curl.git
-          cd curl || exit 1
 
           NDK_PATH=$(find $ANDROID_SDK_ROOT/ndk -maxdepth 1 -mindepth 1 | sort -V | tail -n 1)
           echo "Using Android NDK at: $NDK_PATH"
@@ -58,13 +58,27 @@ jobs:
           export RANLIB="$TOOLCHAIN/llvm-ranlib"
           export STRIP="$TOOLCHAIN/llvm-strip"
 
-          echo "Configuring libcurl..."
+          echo "Compiling mbedTLS statically..."
+          cd mbedtls
+          mkdir build && cd build
+          cmake .. -DCMAKE_TOOLCHAIN_FILE="$NDK_PATH/build/cmake/android.toolchain.cmake" \
+                   -DANDROID_ABI=armeabi-v7a \
+                   -DANDROID_PLATFORM=android-21 \
+                   -DCMAKE_C_FLAGS="-fPIC" \
+                   -DENABLE_TESTS=OFF \
+                   -DENABLE_PROGRAMS=OFF
+          make -j$(nproc)
+          make install DESTDIR=$(pwd)/../../mbedtls_dist
+          cd ../../../
+
+          echo "Configuring libcurl with mbedTLS..."
+          cd curl
           autoreconf -fi
           ./configure --host=arm-linux-androideabi \
                       --prefix=$(pwd)/dist \
                       --disable-shared \
                       --enable-static \
-                      --without-ssl \
+                      --with-mbedtls=$(pwd)/../mbedtls_dist/usr/local \
                       --without-libpsl \
                       --disable-ldap \
                       --disable-dict \
@@ -119,7 +133,7 @@ jobs:
           echo "Preparing jniLibs output directory..."
           mkdir -p android/app/src/main/jniLibs/armeabi-v7a
 
-          echo "Compiling unified native libluajit.so with libcurl, LuaJIT, and CJSON..."
+          echo "Compiling unified native libluajit.so with libcurl (HTTPS), LuaJIT, and CJSON..."
           $TOOLCHAIN/clang --target=armv7a-linux-androideabi21 -shared -fPIC \
             -std=c11 -Dthread_local=_Thread_local \
             -Icurl/dist/include \
@@ -128,6 +142,9 @@ jobs:
             android/app/src/main/cpp/bridge.c \
             lua-cjson/strbuf.o lua-cjson/fpconv.o lua-cjson/lua_cjson.o \
             curl/dist/lib/libcurl.a \
+            mbedtls_dist/usr/local/lib/libmbedtls.a \
+            mbedtls_dist/usr/local/lib/libmbedcrypto.a \
+            mbedtls_dist/usr/local/lib/libmbedx509.a \
             LuaJIT/src/libluajit.a \
             -o android/app/src/main/jniLibs/armeabi-v7a/libluajit.so \
             -llog -lz -lm -latomic
@@ -176,7 +193,7 @@ jobs:
         run: |
           TAG_NAME="v1.0.0-${{ github.run_number }}"
           RELEASE_TITLE="Media Client TV v1.0.0-${{ github.run_number }}"
-          RELEASE_NOTES="Automated signed release build for Android TV (Chromecast HD optimized 32-bit armeabi-v7a with LuaJIT, libcurl HTTP bridge, and built-in cjson)."
+          RELEASE_NOTES="Automated signed release build for Android TV (Chromecast HD optimized 32-bit armeabi-v7a with LuaJIT, libcurl HTTPS via mbedTLS, and built-in cjson)."
           
           APK_PATH=$(find build/app/outputs/flutter-apk/ -name "app-release.apk" -o -name "*.apk" | head -n 1)
           
