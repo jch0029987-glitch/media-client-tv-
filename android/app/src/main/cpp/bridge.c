@@ -13,6 +13,9 @@
 #  define EXPORT
 #endif
 
+// Declare the external cjson loading function provided by the cjson library module
+int luaopen_cjson(lua_State *L);
+
 // Helper struct for libcurl memory chunk storage
 struct MemoryStruct {
     char *memory;
@@ -77,6 +80,16 @@ static int l_http_get(lua_State *L) {
     return 1; // Number of return values pushed onto the Lua stack
 }
 
+// Helper to initialize standard libs, custom http_get, and cjson module
+static void init_lua_environment(lua_State *L) {
+    luaL_openlibs(L);
+    lua_register(L, "http_get", l_http_get);
+
+    // Register cjson module so require("cjson") works natively in scripts
+    luaL_requiref(L, "cjson", luaopen_cjson, 1);
+    lua_pop(L, 1); // Remove the module table from the stack
+}
+
 // Original evaluator for direct script execution
 EXPORT const char* eval_lua_script(const char* script_content) {
     lua_State *L = luaL_newstate();
@@ -84,9 +97,8 @@ EXPORT const char* eval_lua_script(const char* script_content) {
         return "Error: Failed to allocate Lua state";
     }
 
-    // Open standard Lua libraries & register custom libcurl http_get binding
-    luaL_openlibs(L);
-    lua_register(L, "http_get", l_http_get);
+    // Initialize environment with standard libs, curl, and cjson
+    init_lua_environment(L);
 
     // Execute the Lua script string
     if (luaL_dostring(L, script_content) != LUA_OK) {
@@ -116,9 +128,8 @@ EXPORT const char* call_lua_search(const char* script_content, const char* query
     lua_State *L = luaL_newstate();
     if (!L) return "Error: Failed to allocate Lua state";
 
-    // Open standard Lua libraries & register custom libcurl http_get binding
-    luaL_openlibs(L);
-    lua_register(L, "http_get", l_http_get);
+    // Initialize environment with standard libs, curl, and cjson
+    init_lua_environment(L);
 
     // Load the script code into Lua state
     if (luaL_dostring(L, script_content) != LUA_OK) {
