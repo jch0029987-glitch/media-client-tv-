@@ -83,18 +83,19 @@ jobs:
           make install
           cd ..
 
-      - name: Build LuaJIT & Compile HTTP-Enabled Native Bridge
+      - name: Build LuaJIT, CJSON & Compile Unified Native Bridge
         run: |
-          echo "Cloning LuaJIT source..."
-          rm -rf LuaJIT
+          echo "Cloning LuaJIT and Lua-CJSON sources..."
+          rm -rf LuaJIT cjson
           git clone https://github.com/LuaJIT/LuaJIT.git
-          cd LuaJIT || exit 1
-
+          git clone https://github.com/mpx/lua-cjson.git
+          
           NDK_PATH=$(find $ANDROID_SDK_ROOT/ndk -maxdepth 1 -mindepth 1 | sort -V | tail -n 1)
           TOOLCHAIN="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin"
           TARGET_CC="$TOOLCHAIN/clang --target=armv7a-linux-androideabi21"
 
           echo "Compiling LuaJIT..."
+          cd LuaJIT
           make clean
           make HOST_CC="gcc -m32" \
                STATIC_CC="$TARGET_CC -fPIC" \
@@ -103,18 +104,24 @@ jobs:
                TARGET_AR="$TOOLCHAIN/llvm-ar rcus" \
                TARGET_STRIP="$TOOLCHAIN/llvm-strip" \
                TARGET_SYS=Linux
+          cd ..
 
+          echo "Compiling Lua-CJSON object files..."
+          cd cjson
+          $TARGET_CC -fPIC -O3 -c strbuf.c fpconv.c lua_cjson.c -I../LuaJIT/src
           cd ..
 
           echo "Preparing jniLibs output directory..."
           mkdir -p android/app/src/main/jniLibs/armeabi-v7a
 
-          echo "Compiling unified native libluajit.so with libcurl HTTP bridge..."
+          echo "Compiling unified native libluajit.so with libcurl, LuaJIT, and CJSON..."
           $TOOLCHAIN/clang --target=armv7a-linux-androideabi21 -shared -fPIC \
             -std=c11 -Dthread_local=_Thread_local \
             -Icurl/dist/include \
             -ILuaJIT/src \
+            -Icjson \
             android/app/src/main/cpp/bridge.c \
+            cjson/strbuf.o cjson/fpconv.o cjson/lua_cjson.o \
             curl/dist/lib/libcurl.a \
             LuaJIT/src/libluajit.a \
             -o android/app/src/main/jniLibs/armeabi-v7a/libluajit.so \
@@ -164,7 +171,7 @@ jobs:
         run: |
           TAG_NAME="v1.0.0-${{ github.run_number }}"
           RELEASE_TITLE="Media Client TV v1.0.0-${{ github.run_number }}"
-          RELEASE_NOTES="Automated signed release build for Android TV (Chromecast HD optimized 32-bit armeabi-v7a with LuaJIT + libcurl HTTP bridge)."
+          RELEASE_NOTES="Automated signed release build for Android TV (Chromecast HD optimized 32-bit armeabi-v7a with LuaJIT, libcurl HTTP bridge, and built-in cjson)."
           
           APK_PATH=$(find build/app/outputs/flutter-apk/ -name "app-release.apk" -o -name "*.apk" | head -n 1)
           
