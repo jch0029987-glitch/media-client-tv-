@@ -1,17 +1,40 @@
-# media_client_tv
+# Media Client TV-
 
-A new Flutter project.
+This repository contains the source code for the Media Client TV application.
 
 ## Getting Started
 
-This project is a starting point for a Flutter application.
+1. Clone the repository
 
-A few resources to get you started if this is your first Flutter project:
+   ```bash
+   git clone https://github.com/Jch0029987-glitch/media-client-tv-
+   ```
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+2. Install dependencies
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+   ```bash
+   cd media-client-tv-
+   npm install
+   ```
+
+3. Run the application
+
+   ```bash
+   npm start
+   ```
+
+## Contributing
+
+Contributions are welcome! Please open an issue first to discuss what you would like to change.
+
+## License
+
+This project is licensed under the MIT License.
+
+## Contact
+
+For any questions or feedback, please contact [Your Name] at [Your Email].
+
+## Acknowledgments
+
+- [List any acknowledgments here]
