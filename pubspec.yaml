@@ -17,6 +17,8 @@ dependencies:
   qr_flutter: ^4.1.0
   xml: ^6.5.0
   ffi: ^2.1.2
+  multicast_dns: ^0.3.2
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
