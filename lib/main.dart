@@ -1,5 +1,5 @@
 import 'dart:io';
-import 'dart:json';
+import 'dart:convert';
 import 'dart:async';
 import 'dart:ffi' as ffi;
 import 'package:ffi/ffi.dart';
@@ -855,7 +855,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final response = await http.get(url, headers: {'Accept': 'application/vnd.github.v3+json'});
 
       if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
+        final data = json.decode(response.body);
         String latestTag = data['tag_name'] ?? '';
         
         const currentVersion = 'v1.0.0-1';
