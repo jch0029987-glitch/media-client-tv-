@@ -70,61 +70,65 @@ class AirPlayDeviceSelector extends StatelessWidget {
                       final isSelected = airPlaySystem.currentDevice == device.name;
 
                       return Padding(
-                        phone: const EdgeInsets.symmetric(vertical: 4.0),
+                        padding: const EdgeInsets.symmetric(vertical: 4.0),
                         child: Focus(
-                          builder: (context, focused) {
-                            return InkWell(
-                              onTap: () => airPlaySystem.startSession(device),
-                              borderRadius: BorderRadius.circular(8.0),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                                decoration: BoxDecoration(
-                                  color: focused
-                                      ? Colors.blueAccent
-                                      : (isSelected ? Colors.grey[800] : Colors.transparent),
-                                  borderRadius: BorderRadius.circular(8.0),
-                                  border: Border.all(
-                                    color: focused ? Colors.white : Colors.transparent,
-                                    width: 2,
+                          child: Builder(
+                            builder: (context) {
+                              final focused = Focus.of(context).hasFocus;
+                              return InkWell(
+                                onTap: () => airPlaySystem.startSession(device),
+                                borderRadius: BorderRadius.circular(8.0),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                  decoration: BoxDecoration(
+                                    color: focused
+                                        ? Colors.blueAccent
+                                        : (isSelected ? Colors.grey[800] : Colors.transparent),
+                                    borderRadius: BorderRadius.circular(8.0),
+                                    border: Border.all(
+                                      color: focused ? Colors.white : Colors.transparent,
+                                      width: 2,
+                                    ),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        isSelected ? Icons.cast_connected : Icons.phone_iphone,
+                                        color: focused ? Colors.white : Colors.white70,
+                                      ),
+                                      const SizedBox(width: 3),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              device.name,
+                                              style: TextStyle(
+                                                color: focused ? Colors.white : Colors.white70,
+                                                fontSize: 16,
+                                                fontWeight: focused ? FontWeight.bold : FontWeight.normal,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 2),
+                                            Text(
+                                              '${device.ipAddress}:${device.port}',
+                                              style: TextStyle(
+                                                color: focused ? Colors.white70 : Colors.grey,
+                                                fontSize: 12,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      if (isSelected)
+                                        const Icon(Icons.check, color: Colors.greenAccent),
+                                    ],
                                   ),
                                 ),
-                                child: Row(
-                                  children: [
-                                    Icon(
-                                      isSelected ? Icons.cast_connected : Icons.phone_iphone,
-                                      color: focused ? Colors.white : Colors.white70,
-                                    ),
-                                    const SizedBox(width: 12),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            device.name,
-                                            style: TextStyle(
-                                              color: focused ? Colors.white : Colors.white70,
-                                              fontSize: 16,
-                                              fontWeight: focused ? FontWeight.bold : FontWeight.normal,
-                                            ),
-                                          ),
-                                          const SizedBox(height: 2),
-                                          Text(
-                                            '${device.ipAddress}:${device.port}',
-                                            style: TextStyle(
-                                              color: focused ? Colors.white70 : Colors.grey,
-                                              fontSize: 12,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                    if (isSelected)
-                                      const Icon(Icons.check, color: Colors.greenAccent),
-                                  ],
-                                ),
-                              ),
-                            );
-                          },
+                              );
+                            },
+                          ),
                         ),
                       );
                     },
