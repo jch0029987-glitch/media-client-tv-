@@ -1,5 +1,5 @@
 import 'dart:io';
-import 'dart:convert';
+import 'dart:json';
 import 'dart:async';
 import 'dart:ffi' as ffi;
 import 'package:ffi/ffi.dart';
@@ -10,6 +10,8 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:xml/xml.dart' as xml;
 import 'screens/player_screen.dart';
+import 'services/airplay_system.dart';
+import 'widgets/airplay_device_selector.dart';
 
 // Define C function signature mapping for dynamic Lua FFI bindings
 typedef EvalLuaScriptC = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> scriptContent);
@@ -324,7 +326,6 @@ class MeshBackgroundService {
 
         LibraryPluginProvider().registerLoadedPlugin(filename, luaCode);
 
-        // Safely evaluate Lua script execution without crashing the server thread
         try {
           final executionResult = _luaEngine.eval(luaCode);
           if (executionResult.isNotEmpty && !executionResult.startsWith('Error')) {
@@ -441,11 +442,13 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> {
   int _selectedIndex = 0;
+  final AirPlaySystem _airPlaySystem = AirPlaySystem();
 
-  final List<Widget> _screens = const [
-    LibraryScreen(),
-    PluginHubScreen(),
-    SettingsScreen(),
+  late final List<Widget> _screens = [
+    const LibraryScreen(),
+    const PluginHubScreen(),
+    AirPlayHubTab(airPlaySystem: _airPlaySystem),
+    const SettingsScreen(),
   ];
 
   @override
@@ -479,6 +482,10 @@ class _MainScreenState extends State<MainScreen> {
                     label: Text('Plugin Hub'),
                   ),
                   NavigationRailDestination(
+                    icon: Icon(Icons.cast),
+                    label: Text('AirPlay'),
+                  ),
+                  NavigationRailDestination(
                     icon: Icon(Icons.settings),
                     label: Text('Settings'),
                   ),
@@ -492,6 +499,37 @@ class _MainScreenState extends State<MainScreen> {
           ),
         );
       },
+    );
+  }
+}
+
+class AirPlayHubTab extends StatelessWidget {
+  final AirPlaySystem airPlaySystem;
+
+  const AirPlayHubTab({super.key, required this.airPlaySystem});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(40.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'AirPlay Receiver Hub',
+            style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white),
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            'Discover and connect to AirPlay senders on your local network.',
+            style: TextStyle(fontSize: 16, color: Colors.white70),
+          ),
+          const SizedBox(height: 32),
+          Center(
+            child: AirPlayDeviceSelector(airPlaySystem: airPlaySystem),
+          ),
+        ],
+      ),
     );
   }
 }
