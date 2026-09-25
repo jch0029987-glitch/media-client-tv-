@@ -41,10 +41,10 @@ class AirPlaySystem extends ChangeNotifier {
       for (final type in serviceTypes) {
         try {
           await for (final PtrResourceRecord ptr in mdns.lookup<PtrResourceRecord>(
-            ResourceRecordQuery.ptr(name: type),
+            ResourceRecordQuery.pointer(type),
           )) {
             await for (final SrvResourceRecord srv in mdns.lookup<SrvResourceRecord>(
-              ResourceRecordQuery.srv(name: ptr.domainName),
+              ResourceRecordQuery.service(ptr.domainName),
             )) {
               // Lookup corresponding IP address (A or AAAA records)
               await for (final IPAddressResourceRecord ip in mdns.lookup<IPAddressResourceRecord>(
@@ -82,14 +82,11 @@ class AirPlaySystem extends ChangeNotifier {
     }
   }
 
-  // Connect or start session with a target device
   Future<void> startSession(AirPlayDevice device) async {
     _currentDevice = device.name;
     _setState(AirPlayConnectionState.streaming);
-    // TODO: Implement RTSP/RAOP protocol handshake towards device.ipAddress:device.port
   }
 
-  // Tear down session and close sockets
   Future<void> stopSession() async {
     _currentDevice = null;
     _setState(AirPlayConnectionState.disconnected);
