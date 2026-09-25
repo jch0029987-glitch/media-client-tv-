@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
-import 'path/to/airplay_system.dart'; // Adjust import to your actual file structure
+import '../services/airplay_system.dart';
 
 class AirPlayDeviceSelector extends StatelessWidget {
   final AirPlaySystem airPlaySystem;
 
-  const AirPlayDeviceSelector({Key? key, required this.airPlaySystem}) : super(key: key);
+  const AirPlayDeviceSelector({super.key, required this.airPlaySystem});
 
-  @byteOrderMark
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
@@ -14,7 +13,7 @@ class AirPlayDeviceSelector extends StatelessWidget {
       builder: (context, child) {
         return Container(
           padding: const EdgeInsets.all(24.0),
-          width: 400,
+          width: 500,
           decoration: BoxDecoration(
             color: Colors.grey[900],
             borderRadius: BorderRadius.circular(12.0),
@@ -28,7 +27,7 @@ class AirPlayDeviceSelector extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   const Text(
-                    'AirPlay Devices',
+                    'AirPlay Devices & iPhones',
                     style: TextStyle(
                       color: Colors.white,
                       fontSize: 22,
@@ -55,7 +54,7 @@ class AirPlayDeviceSelector extends StatelessWidget {
                   padding: EdgeInsets.symmetric(vertical: 32.0),
                   child: Center(
                     child: Text(
-                      'No AirPlay receivers found.\nPress scan to search.',
+                      'No AirPlay receivers or iPhones found.\nMake sure Wi-Fi & AirPlay are enabled.',
                       textAlign: TextAlign.center,
                       style: TextStyle(color: Colors.grey, fontSize: 14),
                     ),
@@ -67,16 +66,15 @@ class AirPlayDeviceSelector extends StatelessWidget {
                   child: ListView.builder(
                     itemCount: airPlaySystem.discoveredDevices.length,
                     itemBuilder: (context, index) {
-                      final deviceName = airPlaySystem.discoveredDevices[index];
-                      final isSelected = airPlaySystem.currentDevice == deviceName;
+                      final device = airPlaySystem.discoveredDevices[index];
+                      final isSelected = airPlaySystem.currentDevice == device.name;
 
                       return Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 4.0),
+                        phone: const EdgeInsets.symmetric(vertical: 4.0),
                         child: Focus(
-                          // Focus widget ensures Android TV remote D-pad highlights properly
                           builder: (context, focused) {
                             return InkWell(
-                              onTap: () => airPlaySystem.startSession(deviceName),
+                              onTap: () => airPlaySystem.startSession(device),
                               borderRadius: BorderRadius.circular(8.0),
                               child: Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -93,18 +91,31 @@ class AirPlayDeviceSelector extends StatelessWidget {
                                 child: Row(
                                   children: [
                                     Icon(
-                                      isSelected ? Icons.cast_connected : Icons.cast,
+                                      isSelected ? Icons.cast_connected : Icons.phone_iphone,
                                       color: focused ? Colors.white : Colors.white70,
                                     ),
                                     const SizedBox(width: 12),
                                     Expanded(
-                                      child: Text(
-                                        deviceName,
-                                        style: TextStyle(
-                                          color: focused ? Colors.white : Colors.white70,
-                                          fontSize: 16,
-                                          fontWeight: focused ? FontWeight.bold : FontWeight.normal,
-                                        ),
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            device.name,
+                                            style: TextStyle(
+                                              color: focused ? Colors.white : Colors.white70,
+                                              fontSize: 16,
+                                              fontWeight: focused ? FontWeight.bold : FontWeight.normal,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            '${device.ipAddress}:${device.port}',
+                                            style: TextStyle(
+                                              color: focused ? Colors.white70 : Colors.grey,
+                                              fontSize: 12,
+                                            ),
+                                          ),
+                                        ],
                                       ),
                                     ),
                                     if (isSelected)
