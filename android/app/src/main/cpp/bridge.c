@@ -21,6 +21,7 @@ int luaopen_cjson(lua_State *L);
 extern "C" {
 #endif
     int tori_init_session(const char* magnet_uri);
+    int tori_init_session_ex(const char* magnet_uri, const char* cache_dir, int max_cache_mb);
     void tori_stop_session(void);
     const char* tori_get_stats_json(void);
 #ifdef __cplusplus
@@ -190,11 +191,21 @@ EXPORT const char* call_lua_search(const char* script_content, const char* query
     return res_buf;
 }
 
-// --- Torrents FFI Export Bindings ---
+// --- Torrents FFI Export Bindings (Low-Storage Optimized) ---
 
 EXPORT int bridge_start_torrent(const char* magnet_uri) {
     if (!magnet_uri) return -1;
+    // Default fallback to standard initialization if cache path isn't provided
     return tori_init_session(magnet_uri);
+}
+
+EXPORT int bridge_start_torrent_with_cache(const char* magnet_uri, const char* cache_dir, int max_cache_mb) {
+    if (!magnet_uri) return -1;
+    // Enforces strict disk footprint limits for Chromecast HD (e.g. 50MB-100MB max cache ring buffer)
+    if (max_cache_mb <= 0) max_cache_mb = 64; 
+    const char* target_dir = (cache_dir && strlen(cache_dir) > 0) ? cache_dir : "/data/local/tmp";
+    
+    return tori_init_session_ex(magnet_uri, target_dir, max_cache_mb);
 }
 
 EXPORT void bridge_stop_torrent(void) {
