@@ -37,7 +37,7 @@ static size_t WriteMemoryCallback(void *contents, size_t size, size_t nmemb, voi
 static int l_http_get(lua_State *L) {
     const char *url = luaL_checkstring(L, 1);
     if (!url) {
-        lua_pushstring(L, "Error: URL is required for http_get");
+        lua_pushstring(L, "{\"error\": \"URL is required for http_get\"}");
         return 1;
     }
 
@@ -48,24 +48,34 @@ static int l_http_get(lua_State *L) {
     chunk.memory = malloc(1);
     chunk.size = 0;
 
-    curl_global_init(CURL_GLOBAL_ALL);
+    // NOTE: Removed curl_global_init() and curl_global_cleanup() from here.
+    // Calling them per-request destroys thread locks and causes crashes/freezes.
+
     curl_handle = curl_easy_init();
-    
     if (!curl_handle) {
         free(chunk.memory);
-        lua_pushstring(L, "Error: Failed to initialize CURL handle");
+        lua_pushstring(L, "{\"error\": \"Failed to initialize CURL handle\"}");
         return 1;
     }
 
     curl_easy_setopt(curl_handle, CURLOPT_URL, url);
     curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, WriteMemoryCallback);
     curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, (void *)&chunk);
-    curl_easy_setopt(curl_handle, CURLOPT_USERAGENT, "MediaClientTV-LuaAgent/1.0");
-    curl_easy_setopt(curl_handle, CURLOPT_TIMEOUT, 10L);
     
+    // --- STABILITY & TIMEOUT OPTIONS (Prevents Freezes) ---
+    curl_easy_setopt(curl_handle, CURLOPT_CONNECTTIMEOUT, 3L); // Fail fast if TCP handshake takes > 3 seconds
+    curl_easy_setopt(curl_handle, CURLOPT_TIMEOUT, 6L);        // Hard cap total transfer time to 6 seconds
+    curl_easy_setopt(curl_handle, CURLOPT_NOSIGNAL, 1L);       // Thread-safety for multi-threaded environments
+
+    // --- BROWSER HEADERS (Avoids silent Cloudflare blocking/tarpitting) ---
+    struct curl_slist *headers = NULL;
+    headers = curl_slist_append(headers, "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+    headers = curl_slist_append(headers, "Accept: application/json");
+    curl_easy_setopt(curl_handle, CURLOPT_HTTPHEADER, headers);
+
     // Follow HTTP/HTTPS redirects automatically
     curl_easy_setopt(curl_handle, CURLOPT_FOLLOWLOCATION, 1L);
-    curl_easy_setopt(curl_handle, CURLOPT_MAXREDIRS, 5L);
+    curl_easy_setopt(curl_handle, CURLOPT_MAXREDIRS, 3L);
 
     // Bypass SSL certificate checks for embedded Android TV environment compatibility
     curl_easy_setopt(curl_handle, CURLOPT_SSL_VERIFYPEER, 0L);
@@ -81,9 +91,9 @@ static int l_http_get(lua_State *L) {
         lua_pushstring(L, chunk.memory);
     }
 
+    curl_slist_free_all(headers);
     curl_easy_cleanup(curl_handle);
     free(chunk.memory);
-    curl_global_cleanup();
 
     return 1; // Number of return values pushed onto the Lua stack
 }
@@ -108,10 +118,8 @@ EXPORT const char* eval_lua_script(const char* script_content) {
         return "Error: Failed to allocate Lua state";
     }
 
-    // Initialize environment with standard libs, curl, and cjson
     init_lua_environment(L);
 
-    // Execute the Lua script string
     if (luaL_dostring(L, script_content) != LUA_OK) {
         const char *err_msg = lua_tostring(L, -1);
         static thread_local char error_buffer[512];
@@ -120,7 +128,6 @@ EXPORT const char* eval_lua_script(const char* script_content) {
         return error_buffer;
     }
 
-    // Read the top of the stack as the return string (if the script returns a value)
     const char *result = lua_tostring(L, -1);
     static thread_local char result_buffer[1024];
     
@@ -139,10 +146,8 @@ EXPORT const char* call_lua_search(const char* script_content, const char* query
     lua_State *L = luaL_newstate();
     if (!L) return "Error: Failed to allocate Lua state";
 
-    // Initialize environment with standard libs, curl, and cjson
     init_lua_environment(L);
 
-    // Load the script code into Lua state
     if (luaL_dostring(L, script_content) != LUA_OK) {
         const char *err = lua_tostring(L, -1);
         static thread_local char err_buf[512];
@@ -151,13 +156,10 @@ EXPORT const char* call_lua_search(const char* script_content, const char* query
         return err_buf;
     }
 
-    // Look up the global 'search' function defined in the script
     lua_getglobal(L, "search");
     if (lua_isfunction(L, -1)) {
-        // Push the query string argument onto the stack
         lua_pushstring(L, query_term);
 
-        // Call search(query_term) with 1 argument and 1 return value
         if (lua_pcall(L, 1, 1, 0) != LUA_OK) {
             const char *err = lua_tostring(L, -1);
             static thread_local char err_buf[512];
@@ -170,10 +172,7 @@ EXPORT const char* call_lua_search(const char* script_content, const char* query
         return "Error: 'search' function not found in script";
     }
 
-    // Read the resulting JSON return string from the top of the stack
     const char *result = lua_tostring(L, -1);
-    
-    // Expanded to 64KB (65536) to prevent truncating large Invidious JSON payloads
     static thread_local char res_buf[65536];
     
     if (result) {
