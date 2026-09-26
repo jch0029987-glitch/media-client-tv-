@@ -1,4 +1,4 @@
-name: Build TV App APK
+Name: Build TV App APK
 
 on:
   workflow_dispatch:
@@ -39,51 +39,52 @@ jobs:
       - name: Install Host Multilib & Build Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-multilib g++-multilib autoconf automake libtool make cmake
+          sudo apt-get install -y gcc-multilib g++-multilib autoconf automake libtool make cmake perl
 
-      - name: Build libcurl with mbedTLS for armeabi-v7a (Static with PIC & HTTPS)
+      - name: Build OpenSSL & libcurl for armeabi-v7a (Static with PIC & HTTPS)
         run: |
-          echo "Cloning mbedTLS and libcurl sources..."
-          rm -rf mbedtls curl mbedtls_dist
-          git clone --depth 1 --branch v3.6.0 --recurse-submodules https://github.com/Mbed-TLS/mbedtls.git
+          echo "Cloning OpenSSL and libcurl sources..."
+          rm -rf openssl curl openssl_dist
+          git clone --depth 1 --branch openssl-3.2.0 https://github.com/openssl/openssl.git
           git clone --depth 1 https://github.com/curl/curl.git
 
           NDK_PATH=$(find $ANDROID_SDK_ROOT/ndk -maxdepth 1 -mindepth 1 | sort -V | tail -n 1)
           echo "Using Android NDK at: $NDK_PATH"
           
           TOOLCHAIN="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          export PATH="$TOOLCHAIN:$PATH"
+
+          WORKSPACE_ROOT="$PWD"
+          OPENSSL_PREFIX="$WORKSPACE_ROOT/openssl_dist"
+
+          echo "Compiling OpenSSL statically for Android..."
+          cd openssl
+          ./Configure android-arm \
+                    -D__ANDROID_API__=21 \
+                    --prefix="$OPENSSL_PREFIX" \
+                    no-shared \
+                    no-tests \
+                    no-engine
+          make -j$(nproc)
+          make install
+          
+          cd "$WORKSPACE_ROOT"
+
+          echo "Configuring libcurl with OpenSSL..."
+          cd curl
+          autoreconf -fi
+          
           export CC="$TOOLCHAIN/clang --target=armv7a-linux-androideabi21"
           export AR="$TOOLCHAIN/llvm-ar"
           export AS="$TOOLCHAIN/llvm-as"
           export RANLIB="$TOOLCHAIN/llvm-ranlib"
           export STRIP="$TOOLCHAIN/llvm-strip"
 
-          WORKSPACE_ROOT="$PWD"
-          MBEDTLS_PREFIX="$WORKSPACE_ROOT/mbedtls_dist"
-
-          echo "Compiling mbedTLS statically..."
-          cd mbedtls
-          mkdir build && cd build
-          cmake .. -DCMAKE_TOOLCHAIN_FILE="$NDK_PATH/build/cmake/android.toolchain.cmake" \
-                   -DANDROID_ABI=armeabi-v7a \
-                   -DANDROID_PLATFORM=android-21 \
-                   -DCMAKE_C_FLAGS="-fPIC" \
-                   -DCMAKE_INSTALL_PREFIX="$MBEDTLS_PREFIX" \
-                   -DENABLE_TESTS=OFF \
-                   -DENABLE_PROGRAMS=OFF
-          make -j$(nproc)
-          make install
-          
-          cd "$WORKSPACE_ROOT"
-
-          echo "Configuring libcurl with mbedTLS..."
-          cd curl
-          autoreconf -fi
           ./configure --host=arm-linux-androideabi \
                       --prefix="$WORKSPACE_ROOT/curl/dist" \
                       --disable-shared \
                       --enable-static \
-                      --with-mbedtls="$MBEDTLS_PREFIX" \
+                      --with-openssl="$OPENSSL_PREFIX" \
                       --without-libpsl \
                       --disable-ldap \
                       --disable-dict \
@@ -112,7 +113,6 @@ jobs:
           git clone --depth 1 https://github.com/jakerieger/Tori.git bittorrent_engine
 
           NDK_PATH=$(find $ANDROID_SDK_ROOT/ndk -maxdepth 1 -mindepth 1 | sort -V | tail -n 1)
-          TOOLCHAIN="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin"
 
           echo "Compiling BitTorrent engine source files..."
           cd bittorrent_engine
@@ -121,7 +121,8 @@ jobs:
                    -DANDROID_ABI=armeabi-v7a \
                    -DANDROID_PLATFORM=android-21 \
                    -DCMAKE_C_FLAGS="-fPIC" \
-                   -DCMAKE_CXX_FLAGS="-fPIC -std=c++20"
+                   -DCMAKE_CXX_FLAGS="-fPIC -std=c++20" \
+                   -DOPENSSL_ROOT_DIR="$WORKSPACE_ROOT/openssl_dist"
           make -j$(nproc)
           
           cd "$WORKSPACE_ROOT"
@@ -167,6 +168,8 @@ jobs:
           $TOOLCHAIN/clang --target=armv7a-linux-androideabi21 -shared -fPIC \
             -std=c++20 -Dthread_local=_Thread_local \
             -Icurl/dist/include \
+            -IOpenSSL/include \
+            -Iopenssl_dist/include \
             -ILuaJIT/src \
             -Ilua-cjson \
             -Ibittorrent_engine/include \
@@ -174,9 +177,8 @@ jobs:
             lua-cjson/strbuf.o lua-cjson/fpconv.o lua-cjson/lua_cjson.o \
             bittorrent_engine/build/lib/libtori.a \
             curl/dist/lib/libcurl.a \
-            mbedtls_dist/lib/libmbedtls.a \
-            mbedtls_dist/lib/libmbedcrypto.a \
-            mbedtls_dist/lib/libmbedx509.a \
+            openssl_dist/lib/libssl.a \
+            openssl_dist/lib/libcrypto.a \
             LuaJIT/src/libluajit.a \
             -o android/app/src/main/jniLibs/armeabi-v7a/libluajit.so \
             -llog -lz -lm -latomic -lc++
