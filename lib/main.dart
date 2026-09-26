@@ -245,7 +245,7 @@ class SettingsManager extends ChangeNotifier {
   }
 }
 
-/// Reactive State Manager for Dynamic Plugin Catalog Ingestion & Loaded Plugins Tracking
+/// Reactive State Manager for Dynamic Plugin Catalog & Structured Multi-Row Shelves
 class LibraryPluginProvider extends ChangeNotifier {
   static final LibraryPluginProvider _instance = LibraryPluginProvider._internal();
   factory LibraryPluginProvider() => _instance;
@@ -253,6 +253,9 @@ class LibraryPluginProvider extends ChangeNotifier {
 
   final List<dynamic> _dynamicCatalogItems = [];
   List<dynamic> get dynamicCatalogItems => _dynamicCatalogItems;
+
+  final List<dynamic> _dynamicRows = [];
+  List<dynamic> get dynamicRows => _dynamicRows;
 
   final List<Map<String, String>> _loadedPlugins = [];
   List<Map<String, String>> get loadedPlugins => _loadedPlugins;
@@ -263,9 +266,23 @@ class LibraryPluginProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  void injectPluginItems(List<dynamic> newItems) {
+  void injectPluginPayload(dynamic parsedOutput) {
     _dynamicCatalogItems.clear();
-    _dynamicCatalogItems.addAll(newItems);
+    _dynamicRows.clear();
+
+    if (parsedOutput is List) {
+      _dynamicCatalogItems.addAll(parsedOutput);
+    } else if (parsedOutput is Map) {
+      if (parsedOutput['rows'] != null && parsedOutput['rows'] is List) {
+        // Sort rows by priority if provided
+        final rowsList = List<dynamic>.from(parsedOutput['rows']);
+        rowsList.sort((a, b) => (a['priority'] ?? 0).compareTo(b['priority'] ?? 0));
+        _dynamicRows.addAll(rowsList);
+      }
+      if (parsedOutput['items'] != null && parsedOutput['items'] is List) {
+        _dynamicCatalogItems.addAll(parsedOutput['items']);
+      }
+    }
     notifyListeners();
   }
 }
@@ -327,14 +344,11 @@ class MeshBackgroundService {
         LibraryPluginProvider().registerLoadedPlugin(filename, luaCode);
 
         try {
+          // If plugin defines a get_plugin_manifest() or returns a JSON table structure
           final executionResult = _luaEngine.eval(luaCode);
           if (executionResult.isNotEmpty && !executionResult.startsWith('Error')) {
             final parsedOutput = json.decode(executionResult);
-            if (parsedOutput is List) {
-              LibraryPluginProvider().injectPluginItems(parsedOutput);
-            } else if (parsedOutput is Map && parsedOutput['items'] != null) {
-              LibraryPluginProvider().injectPluginItems(parsedOutput['items']);
-            }
+            LibraryPluginProvider().injectPluginPayload(parsedOutput);
           }
         } catch (e) {
           print("Lua execution evaluation notice: $e");
@@ -406,7 +420,6 @@ void main() async {
   await MeshBackgroundService().startServer();
 
   // Initialize and boot up the native AirPlay receiver daemon (`libairplay_daemon.so`)
-  // This acquires the Android Multicast Lock and starts advertising mDNS & RTSP services
   AirPlaySystem().initializeNativeDaemon();
   await AirPlaySystem().startNativeServer(7000);
 
@@ -552,6 +565,7 @@ class LibraryScreen extends StatefulWidget {
 class _LibraryScreenState extends State<LibraryScreen> {
   List<dynamic> _addons = [];
   List<dynamic> _currentCatalogItems = [];
+  List<dynamic> _currentDynamicRows = [];
   bool _isLoading = true;
   int _selectedAddonIndex = 0;
   String? _activeCatalogUrl;
@@ -577,6 +591,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     if (_activeCatalogUrl == 'local://lua_plugin') {
       setState(() {
         _currentCatalogItems = _pluginProvider.dynamicCatalogItems;
+        _currentDynamicRows = _pluginProvider.dynamicRows;
         _isLoading = false;
       });
     }
@@ -622,6 +637,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     if (catalogUrl == 'local://lua_plugin') {
       setState(() {
         _currentCatalogItems = _pluginProvider.dynamicCatalogItems;
+        _currentDynamicRows = _pluginProvider.dynamicRows;
         _isLoading = false;
       });
     } else {
@@ -639,6 +655,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
         final data = json.decode(response.body);
         setState(() {
           _currentCatalogItems = data['items'] ?? [];
+          _currentDynamicRows = [];
           _isLoading = false;
         });
       }
@@ -696,74 +713,156 @@ class _LibraryScreenState extends State<LibraryScreen> {
               Expanded(
                 child: _isLoading
                     ? Center(child: CircularProgressIndicator(color: skin.primaryColor))
-                    : _currentCatalogItems.isEmpty
-                        ? Center(
-                            child: Text(
-                              _activeCatalogUrl == 'local://lua_plugin'
-                                  ? 'No items from Lua plugin yet.\nDeploy a Lua script via the web mesh UI.'
-                                  : 'No media items found.',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(color: skin.textSecondaryColor),
-                            ),
-                          )
-                        : GridView.builder(
-                            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                              crossAxisCount: skin.gridColumns,
-                              crossAxisSpacing: 20,
-                              mainAxisSpacing: 20,
-                              childAspectRatio: 16 / 9,
-                            ),
-                            itemCount: _currentCatalogItems.length,
-                            itemBuilder: (context, index) {
-                              final item = _currentCatalogItems[index];
-                              return Focus(
-                                child: Builder(
-                                  builder: (context) {
-                                    final hasFocus = Focus.of(context).hasFocus;
-                                    return AnimatedContainer(
-                                      duration: const Duration(milliseconds: 200),
-                                      decoration: BoxDecoration(
-                                        color: skin.cardBackgroundColor,
-                                        borderRadius: BorderRadius.circular(skin.cardCornerRadius),
-                                        border: Border.all(
-                                          color: hasFocus ? skin.primaryColor : Colors.transparent,
-                                          width: skin.borderWidth,
-                                        ),
-                                        boxShadow: hasFocus
-                                            ? [BoxShadow(color: skin.primaryColor, blurRadius: 10, spreadRadius: 2)]
-                                            : [],
-                                      ),
-                                      child: InkWell(
-                                        onTap: () {
-                                          final url = item['url'] ?? '';
-                                          final title = item['title'] ?? item['name'] ?? 'Media Item';
-                                          if (url.isNotEmpty) {
-                                            Navigator.push(
-                                              context,
-                                              MaterialPageRoute(
-                                                builder: (context) => PlayerScreen(streamUrl: url, title: title),
-                                              ),
-                                            );
-                                          }
-                                        },
-                                        borderRadius: BorderRadius.circular(skin.cardCornerRadius),
-                                        child: Center(
-                                          child: Padding(
-                                            padding: const EdgeInsets.all(12.0),
-                                            child: Text(
-                                              item['title'] ?? item['name'] ?? 'Item',
-                                              textAlign: TextAlign.center,
-                                              style: TextStyle(fontSize: 16, color: skin.textPrimaryColor, fontWeight: FontWeight.bold),
-                                            ),
+                    : (_activeCatalogUrl == 'local://lua_plugin' && _currentDynamicRows.isNotEmpty)
+                        // Render Dynamic Multi-Row Shelves Engine
+                        ? ListView.builder(
+                            itemCount: _currentDynamicRows.length,
+                            itemBuilder: (context, rowIndex) {
+                              final row = _currentDynamicRows[rowIndex];
+                              final rowTitle = row['title'] ?? 'Shelf';
+                              final items = (row['items'] as List?) ?? [];
+
+                              return Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(vertical: 8.0),
+                                    child: Text(
+                                      rowTitle,
+                                      style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: skin.textPrimaryColor),
+                                    ),
+                                  ),
+                                  SizedBox(
+                                    height: 180,
+                                    child: ListView.builder(
+                                      scrollDirection: Axis.horizontal,
+                                      itemCount: items.length,
+                                      itemBuilder: (context, itemIndex) {
+                                        final item = items[itemIndex];
+                                        return Focus(
+                                          child: Builder(
+                                            builder: (context) {
+                                              final hasFocus = Focus.of(context).hasFocus;
+                                              return AnimatedContainer(
+                                                duration: const Duration(milliseconds: 200),
+                                                width: 140,
+                                                margin: const EdgeInsets.only(right: 16, bottom: 12),
+                                                decoration: BoxDecoration(
+                                                  color: skin.cardBackgroundColor,
+                                                  borderRadius: BorderRadius.circular(skin.cardCornerRadius),
+                                                  border: Border.all(
+                                                    color: hasFocus ? skin.primaryColor : Colors.transparent,
+                                                    width: skin.borderWidth,
+                                                  ),
+                                                  boxShadow: hasFocus
+                                                      ? [BoxShadow(color: skin.primaryColor, blurRadius: 10, spreadRadius: 2)]
+                                                      : [],
+                                                ),
+                                                child: InkWell(
+                                                  onTap: () {
+                                                    final url = item['stream_url'] ?? item['url'] ?? '';
+                                                    final title = item['title'] ?? 'Media Item';
+                                                    if (url.isNotEmpty) {
+                                                      Navigator.push(
+                                                        context,
+                                                        MaterialPageRoute(
+                                                          builder: (context) => PlayerScreen(streamUrl: url, title: title),
+                                                        ),
+                                                      );
+                                                    }
+                                                  },
+                                                  borderRadius: BorderRadius.circular(skin.cardCornerRadius),
+                                                  child: Center(
+                                                    child: Padding(
+                                                      padding: const EdgeInsets.all(8.0),
+                                                      child: Text(
+                                                        item['title'] ?? 'Item',
+                                                        textAlign: TextAlign.center,
+                                                        style: TextStyle(fontSize: 14, color: skin.textPrimaryColor, fontWeight: FontWeight.bold),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ),
+                                              );
+                                            },
                                           ),
-                                        ),
-                                      ),
-                                    );
-                                  },
-                                ),
+                                        );
+                                      },
+                                    ),
+                                  ),
+                                  const SizedBox(height: 16),
+                                ],
                               );
                             },
-                          ),
+                          )
+                        : _currentCatalogItems.isEmpty
+                            ? Center(
+                                child: Text(
+                                  _activeCatalogUrl == 'local://lua_plugin'
+                                      ? 'No items or rows from Lua plugin yet.\nDeploy a Lua script via the web mesh UI.'
+                                      : 'No media items found.',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(color: skin.textSecondaryColor),
+                                ),
+                              )
+                            : GridView.builder(
+                                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                                  crossAxisCount: skin.gridColumns,
+                                  crossAxisSpacing: 20,
+                                  mainAxisSpacing: 20,
+                                  childAspectRatio: 16 / 9,
+                                ),
+                                itemCount: _currentCatalogItems.length,
+                                itemBuilder: (context, index) {
+                                  final item = _currentCatalogItems[index];
+                                  return Focus(
+                                    child: Builder(
+                                      builder: (context) {
+                                        final hasFocus = Focus.of(context).hasFocus;
+                                        return AnimatedContainer(
+                                          duration: const Duration(milliseconds: 200),
+                                          decoration: BoxDecoration(
+                                            color: skin.cardBackgroundColor,
+                                            borderRadius: BorderRadius.circular(skin.cardCornerRadius),
+                                            border: Border.all(
+                                              color: hasFocus ? skin.primaryColor : Colors.transparent,
+                                              width: skin.borderWidth,
+                                            ),
+                                            boxShadow: hasFocus
+                                                ? [BoxShadow(color: skin.primaryColor, blurRadius: 10, spreadRadius: 2)]
+                                                : [],
+                                          ),
+                                          child: InkWell(
+                                            onTap: () {
+                                              final url = item['url'] ?? '';
+                                              final title = item['title'] ?? item['name'] ?? 'Media Item';
+                                              if (url.isNotEmpty) {
+                                                Navigator.push(
+                                                  context,
+                                                  MaterialPageRoute(
+                                                    builder: (context) => PlayerScreen(streamUrl: url, title: title),
+                                                  ),
+                                                );
+                                              }
+                                            },
+                                            borderRadius: BorderRadius.circular(skin.cardCornerRadius),
+                                            child: Center(
+                                              child: Padding(
+                                                padding: const EdgeInsets.all(12.0),
+                                                child: Text(
+                                                  item['title'] ?? item['name'] ?? 'Item',
+                                                  textAlign: TextAlign.center,
+                                                  style: TextStyle(fontSize: 16, color: skin.textPrimaryColor, fontWeight: FontWeight.bold),
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                  );
+                                },
+                              ),
               ),
             ],
           ),
