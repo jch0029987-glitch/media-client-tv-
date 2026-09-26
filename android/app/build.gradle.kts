@@ -28,6 +28,21 @@ android {
         targetSdk = 34
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+
+        // Link external native build configuration
+        externalNativeBuild {
+            cmake {
+                cppFlags("")
+            }
+        }
+    }
+
+    // Connects Gradle to your CMake script file
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
     }
 
     // Required for serious_python to extract and load native .so files properly
@@ -50,7 +65,6 @@ android {
 
     buildTypes {
         release {
-            // Automatically uses release signing config if key.properties exists, otherwise falls back to debug
             signingConfig = if (keystorePropertiesFile.exists()) {
                 signingConfigs.getByName("release")
             } else {
