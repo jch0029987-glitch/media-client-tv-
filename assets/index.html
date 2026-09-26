@@ -24,6 +24,7 @@
         <nav class="flex space-x-2">
             <button onclick="switchTab('plugins')" id="btn-plugins" class="px-4 py-2 rounded font-medium bg-blue-600 text-white transition">Plugin Hub</button>
             <button onclick="switchTab('skins')" id="btn-skins" class="px-4 py-2 rounded font-medium bg-gray-800 text-gray-300 hover:bg-gray-700 transition">Skin Studio</button>
+            <button onclick="switchTab('clipboard')" id="btn-clipboard" class="px-4 py-2 rounded font-medium bg-gray-800 text-gray-300 hover:bg-gray-700 transition">Clipboard Sync</button>
             <button onclick="switchTab('system')" id="btn-system" class="px-4 py-2 rounded font-medium bg-gray-800 text-gray-300 hover:bg-gray-700 transition">System & Actions</button>
         </nav>
     </header>
@@ -122,7 +123,23 @@ end</textarea>
             </div>
         </section>
 
-        <!-- TAB 3: SYSTEM & ACTIONS -->
+        <!-- TAB 3: CLIPBOARD SYNC -->
+        <section id="tab-clipboard" class="tab-content space-y-6">
+            <h2 class="text-2xl font-bold text-white">Remote Clipboard & Magnet Push</h2>
+            <div class="bg-gray-900 p-6 rounded-lg border border-gray-800 space-y-4 max-w-2xl">
+                <p class="text-sm text-gray-400">Push magnet links, stream URLs, or text directly to the TV's Torrent Hub input field and system clipboard.</p>
+                <div class="space-y-2">
+                    <label class="block text-sm font-semibold text-gray-300">Payload / Magnet Link</label>
+                    <textarea id="clipboard-input" rows="4" class="w-full p-3 rounded font-mono text-sm" placeholder="magnet:?xt=urn:btih:..."></textarea>
+                </div>
+                <div class="flex space-x-4">
+                    <button onclick="pushClipboard()" class="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded font-bold transition">Push to TV Clipboard</button>
+                    <button onclick="fetchCurrentClipboard()" class="bg-gray-800 hover:bg-gray-700 text-gray-300 px-6 py-2 rounded font-bold transition">Get Current TV Clipboard</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- TAB 4: SYSTEM & ACTIONS -->
         <section id="tab-system" class="tab-content space-y-6">
             <h2 class="text-2xl font-bold text-white">System Diagnostics & Actions</h2>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -208,7 +225,7 @@ end</textarea>
 
         function switchTab(tabId) {
             document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
-            ['plugins', 'skins', 'system'].forEach(id => {
+            ['plugins', 'skins', 'clipboard', 'system'].forEach(id => {
                 const btn = document.getElementById(`btn-${id}`);
                 if (id === tabId) {
                     btn.className = "px-4 py-2 rounded font-medium bg-blue-600 text-white transition";
@@ -270,6 +287,41 @@ end</textarea>
                 else showStatus(`Error: ${data.error}`, true);
             } catch (e) {
                 showStatus(`Connection failed: ${e}`, true);
+            }
+        }
+
+        async function pushClipboard() {
+            const text = document.getElementById('clipboard-input').value.trim();
+            if (!text) {
+                showStatus('Please enter text or a magnet link to push.', true);
+                return;
+            }
+            try {
+                const res = await fetch('/api/clipboard', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ clipboard: text })
+                });
+                if (res.ok) {
+                    showStatus('Clipboard pushed successfully to TV!');
+                } else {
+                    showStatus('Failed to push clipboard.', true);
+                }
+            } catch (e) {
+                showStatus(`Connection failed: ${e}`, true);
+            }
+        }
+
+        async function fetchCurrentClipboard() {
+            try {
+                const res = await fetch('/api/clipboard');
+                if (res.ok) {
+                    const data = await res.json();
+                    document.getElementById('clipboard-input').value = data.clipboard || '';
+                    showStatus('Fetched current TV clipboard.');
+                }
+            } catch (e) {
+                showStatus(`Failed to fetch clipboard: ${e}`, true);
             }
         }
 
