@@ -4,7 +4,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:multicast_dns/multicast_dns.dart';
 
-// 1. C Function Signatures for Native AirPlay Receiver Daemon
+// C Function Signatures for Native AirPlay Receiver Daemon
 typedef StartAirPlayC = ffi.Int32 Function(ffi.Int32 port);
 typedef StartAirPlayDart = int Function(int port);
 
@@ -35,13 +35,12 @@ class AirPlaySystem extends ChangeNotifier {
   final List<AirPlayDevice> _discoveredDevices = [];
   List<AirPlayDevice> get discoveredDevices => List.unmodifiable(_discoveredDevices);
 
-  // Native FFI Handles for the Background Server
+  // Native FFI Handles
   late final ffi.DynamicLibrary _lib;
   late final StartAirPlayDart _startServer;
   late final StopAirPlayDart _stopServer;
   bool _nativeInitialized = false;
 
-  // Initialize the native C background daemon library (libairplay_daemon.so)
   void initializeNativeDaemon() {
     if (_nativeInitialized) return;
     try {
@@ -58,33 +57,36 @@ class AirPlaySystem extends ChangeNotifier {
           .asFunction();
 
       _nativeInitialized = true;
-      debugPrint('AirPlay native daemon loaded successfully.');
+      debugPrint('[AirPlaySystem] Native daemon loaded successfully.');
     } catch (e) {
-      debugPrint('Failed to load libairplay_daemon.so: $e');
+      debugPrint('[AirPlaySystem] Failed to load libairplay_daemon.so: $e');
     }
   }
 
-  // Start the background C server thread (acting as a receiver target)
-  bool startNativeServer(int port) {
+  Future<bool> startNativeServer(int port) async {
     if (!_nativeInitialized) initializeNativeDaemon();
     if (!_nativeInitialized) return false;
-    final result = _startServer(port);
-    if (result == 0) {
-      _setState(AirPlayConnectionState.discovering);
-      return true;
+    
+    try {
+      final result = _startServer(port);
+      if (result == 0) {
+        debugPrint('[AirPlaySystem] Native receiver server successfully bound to port $port.');
+        return true;
+      }
+    } catch (e) {
+      debugPrint('[AirPlaySystem] Error starting native server: $e');
     }
     return false;
   }
 
-  // Stop the background C server thread
   void stopNativeServer() {
     if (_nativeInitialized) {
       _stopServer();
       _setState(AirPlayConnectionState.disconnected);
+      debugPrint('[AirPlaySystem] Native receiver server stopped.');
     }
   }
 
-  // Discover available AirPlay devices on the local network (Client search mode)
   Future<void> discoverDevices() async {
     if (_state == AirPlayConnectionState.discovering) return;
     
@@ -95,7 +97,6 @@ class AirPlaySystem extends ChangeNotifier {
     final MDnsClient mdns = MDnsClient();
     try {
       await mdns.start();
-
       const serviceTypes = ['_airplay._tcp.local', '_raop._tcp.local'];
 
       for (final type in serviceTypes) {
@@ -109,7 +110,7 @@ class AirPlaySystem extends ChangeNotifier {
               await for (final IPAddressResourceRecord ip in mdns.lookup<IPAddressResourceRecord>(
                 ResourceRecordQuery.addressIPv4(srv.target),
               )) {
-                final deviceName = ptr.domainName.replaceAll('.' + type, '');
+                final deviceName = ptr.domainName.replaceAll('.$type', '');
                 final ipAddress = ip.address.address;
 
                 if (!_discoveredDevices.any((d) => d.ipAddress == ipAddress || d.name == deviceName)) {
@@ -126,11 +127,11 @@ class AirPlaySystem extends ChangeNotifier {
             }
           }
         } catch (e) {
-          debugPrint('Notice during lookup for $type: $e');
+          debugPrint('[AirPlaySystem] Notice during lookup for $type: $e');
         }
       }
     } catch (e) {
-      debugPrint('Error starting mDNS client: $e');
+      debugPrint('[AirPlaySystem] Error running mDNS discovery: $e');
       _setState(AirPlayConnectionState.error);
     } finally {
       mdns.stop();
