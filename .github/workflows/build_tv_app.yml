@@ -182,18 +182,22 @@ jobs:
           $TARGET_CC -fPIC -O3 -c strbuf.c fpconv.c lua_cjson.c -I../LuaJIT/src
           cd "$WORKSPACE_ROOT"
 
+          echo "Compiling bridge.c as pure C..."
+          $TARGET_CC -fPIC -O3 -c android/app/src/main/cpp/bridge.c \
+            -o android/app/src/main/cpp/bridge.o \
+            -Icurl/dist/include \
+            -Iopenssl_dist/include \
+            -ILuaJIT/src \
+            -Ilua-cjson \
+            -Ibittorrent_engine/include
+
           echo "Preparing jniLibs output directory..."
           mkdir -p android/app/src/main/jniLibs/armeabi-v7a
 
           echo "Compiling unified native libluajit.so with libcurl, LuaJIT, CJSON, and BitTorrent Engine..."
           $TOOLCHAIN/clang++ --target=armv7a-linux-androideabi21 -shared -fPIC \
             -std=c++20 -Dthread_local=_Thread_local \
-            -Icurl/dist/include \
-            -Iopenssl_dist/include \
-            -ILuaJIT/src \
-            -Ilua-cjson \
-            -Ibittorrent_engine/include \
-            android/app/src/main/cpp/bridge.c \
+            android/app/src/main/cpp/bridge.o \
             lua-cjson/strbuf.o lua-cjson/fpconv.o lua-cjson/lua_cjson.o \
             -o android/app/src/main/jniLibs/armeabi-v7a/libluajit.so \
             -Wl,--start-group \
