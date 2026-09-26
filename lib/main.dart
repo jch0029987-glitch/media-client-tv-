@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:json'; // Note: standard Dart uses 'dart:convert' for json decode/encode
 import 'dart:convert';
 import 'dart:async';
 import 'dart:ffi' as ffi;
@@ -52,7 +53,7 @@ class MeshLogProvider extends ChangeNotifier {
   }
 }
 
-/// Persistent Local Storage & Folder Link Manager
+/// Persistent Local Storage & Folder Link Manager with Automated Reboot Rehydration
 class StorageManager extends ChangeNotifier {
   static final StorageManager _instance = StorageManager._internal();
   factory StorageManager() => _instance;
@@ -68,8 +69,19 @@ class StorageManager extends ChangeNotifier {
     try {
       final prefs = await SharedPreferences.getInstance();
       _linkedFolderPath = prefs.getString('mesh_linked_folder_path');
+      
+      // Fallback to app documents plugin directory if no external folder is explicitly linked yet
+      if (_linkedFolderPath == null) {
+        final appDir = await getApplicationDocumentsDirectory();
+        final pluginDir = Directory('${appDir.path}/plugins');
+        if (await pluginDir.exists()) {
+          _linkedFolderPath = pluginDir.path;
+        }
+      }
+
       if (_linkedFolderPath != null) {
         await scanLinkedFolder();
+        await _reloadSavedPluginsFromDisk();
       }
     } catch (e) {
       MeshLogProvider().addLog("Failed to load linked folder: $e");
@@ -82,6 +94,7 @@ class StorageManager extends ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('mesh_linked_folder_path', path);
       await scanLinkedFolder();
+      await _reloadSavedPluginsFromDisk();
       MeshLogProvider().addLog("Successfully linked storage folder: $path");
       notifyListeners();
     } catch (e) {
@@ -104,6 +117,38 @@ class StorageManager extends ChangeNotifier {
       }
     } catch (e) {
       MeshLogProvider().addLog("Error scanning linked folder: $e");
+    }
+  }
+
+  /// Automatically parses and registers saved .lua files back into the engine on reboot
+  Future<void> _reloadSavedPluginsFromDisk() async {
+    if (_linkedFolderPath == null) return;
+    try {
+      final engine = LuaJitEngine();
+      for (var entity in _linkedFiles) {
+        if (entity is File && entity.path.endsWith('.lua')) {
+          final filename = entity.path.split('/').last;
+          final luaCode = await entity.readAsString();
+          
+          // Register into plugin provider
+          LibraryPluginProvider().registerLoadedPlugin(filename, luaCode);
+          
+          // Evaluate and inject payload so shelves are populated instantly on boot
+          try {
+            final executionResult = engine.eval(luaCode);
+            if (executionResult.isNotEmpty && !executionResult.startsWith('Error')) {
+              final parsedOutput = json.decode(executionResult);
+              LibraryPluginProvider().injectPluginPayload(parsedOutput);
+            }
+          } catch (e) {
+            MeshLogProvider().addLog("Lua reboot evaluation notice for $filename: $e");
+          }
+          
+          MeshLogProvider().addLog("Restored plugin from disk on reboot: $filename");
+        }
+      }
+    } catch (e) {
+      MeshLogProvider().addLog("Failed to reload plugins from disk: $e");
     }
   }
 
@@ -552,7 +597,7 @@ void main() async {
   
   await SkinManager().loadSavedSkin();
   await SettingsManager().loadSavedSettings();
-  await StorageManager().loadLinkedFolder();
+  await StorageManager().loadLinkedFolder(); // Automatically loads path and re-hydrates .lua plugins on startup
   
   await MeshBackgroundService().startServer();
 
@@ -751,7 +796,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
         ];
       });
 
-      if (_addons.isNotEmpty) {
+      // Automatically select local Lua provider by default if plugins were rehydrated from disk on boot
+      if (_pluginProvider.loadedPlugins.isNotEmpty) {
+        _selectCatalogProvider(0, 'local://lua_plugin');
+      } else if (_addons.isNotEmpty) {
         _selectCatalogProvider(0, _addons[0]['catalog_url']);
       } else {
         setState(() => _isLoading = false);
