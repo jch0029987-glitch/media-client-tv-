@@ -886,6 +886,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
     final String itemType = item['type'] ?? 'video';
     final String itemTitle = item['title'] ?? 'Media Item';
 
+    MeshLogProvider().addLog("Action Triggered: [$action] on item: $itemTitle (ID: $itemId)");
+    await ToastHelper.showToast('Executing: $itemTitle');
+
     if (itemType == 'directory' || action == 'trending' || action == 'popular') {
       setState(() => _isLoading = true);
       
@@ -904,16 +907,20 @@ class _LibraryScreenState extends State<LibraryScreen> {
             _currentDynamicRows = [];
             _isLoading = false;
           });
+          MeshLogProvider().addLog("Successfully loaded directory action: $action");
         } catch (e) {
           MeshLogProvider().addLog("Failed to parse directory action result: $e");
+          await ToastHelper.showToast('Error loading directory');
           setState(() => _isLoading = false);
         }
       } else {
+        MeshLogProvider().addLog("No active Lua plugin found for action: $action");
         setState(() => _isLoading = false);
       }
     } else {
       final url = item['stream_url'] ?? item['url'] ?? '';
       if (url.isNotEmpty) {
+        MeshLogProvider().addLog("Opening player for stream URL: $url");
         Navigator.push(
           context,
           MaterialPageRoute(
@@ -937,6 +944,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
             setState(() => _isLoading = false);
 
             if (streamUrl.isNotEmpty) {
+              MeshLogProvider().addLog("Successfully resolved stream URL for ID: $itemId");
               Navigator.push(
                 context,
                 MaterialPageRoute(
@@ -945,9 +953,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
               );
             } else {
               MeshLogProvider().addLog("Resolved stream URL was empty for item ID: $itemId");
+              await ToastHelper.showToast('Stream resolution failed');
             }
           } catch (e) {
             MeshLogProvider().addLog("Failed to resolve stream JSON: $e");
+            await ToastHelper.showToast('Stream resolution error');
             setState(() => _isLoading = false);
           }
         }
