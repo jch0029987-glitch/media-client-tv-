@@ -195,7 +195,7 @@ jobs:
             -Ibittorrent_engine/include \
             android/app/src/main/cpp/bridge.c \
             lua-cjson/strbuf.o lua-cjson/fpconv.o lua-cjson/lua_cjson.o \
-            bittorrent_engine/build/lib/libtori.a \
+            bittorrent_engine/build/Source/libtori/liblibtori.a \
             curl/dist/lib/libcurl.a \
             openssl_dist/lib/libssl.a \
             openssl_dist/lib/libcrypto.a \
