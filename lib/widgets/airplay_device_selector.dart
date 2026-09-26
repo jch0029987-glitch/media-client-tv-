@@ -96,7 +96,6 @@ class AirPlayDeviceSelector extends StatelessWidget {
                                         isSelected ? Icons.cast_connected : Icons.phone_iphone,
                                         color: focused ? Colors.white : Colors.white70,
                                       ),
-                                      const SizedBox(width: 3),
                                       const SizedBox(width: 12),
                                       Expanded(
                                         child: Column(
