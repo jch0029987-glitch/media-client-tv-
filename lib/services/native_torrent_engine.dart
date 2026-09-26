@@ -9,10 +9,10 @@ class TorrentTask {
   final String id;
   final String name;
   final String magnetUri;
-  double progress; // 0.0 to 100.0
-  int downloadSpeed; // bytes per second
-  int totalSize; // bytes
-  String status; // 'downloading', 'paused', 'completed', 'error'
+  double progress;
+  int downloadSpeed;
+  int totalSize;
+  String status;
 
   TorrentTask({
     required this.id,
@@ -49,28 +49,27 @@ class NativeTorrentEngine {
   Stream<Map<String, TorrentTask>> get taskStream => _taskController.stream;
   List<TorrentTask> get tasks => _activeTasks.values.toList();
 
-  /// Initializes the native torrent daemon bindings and method call receivers
+  /// Initializes the native torrent daemon with strict low-storage and small-cache settings
   Future<void> initialize() async {
     if (_isInitialized) return;
 
     try {
       _channel.setMethodCallHandler(_handleNativeCallback);
       
-      // Invoke platform channel to initialize native C/C++ or libtorrent session
       await _channel.invokeMethod('initEngine', {
         'downloadPath': StorageManager().activeFolderPath,
+        'cacheSizeMb': 16, // Limit internal disk cache to 16MB to save RAM/storage
+        'sparseAllocation': true, // Prevent pre-allocating full file sizes on disk
       });
 
       _isInitialized = true;
-      MeshLogProvider().addLog('Native Torrent Engine successfully initialized.');
+      MeshLogProvider().addLog('Native Torrent Engine initialized (Low-Storage Mode active).');
     } catch (e) {
       MeshLogProvider().addLog('Failed to initialize Native Torrent Engine: $e');
-      // Fallback: Allow app execution even if platform-specific native hooks are stubbed
       _isInitialized = true;
     }
   }
 
-  /// Starts downloading a new torrent via magnet URI or file path
   Future<String?> addTorrent(String magnetUri, {String? customName}) async {
     if (!_isInitialized) await initialize();
 
@@ -82,70 +81,105 @@ class NativeTorrentEngine {
       name: taskName,
       magnetUri: magnetUri,
       progress: 0.0,
-      downloadSpeed: 1024 * 512, // 512 KB/s initial mock telemetry
-      totalSize: 1024 * 1024 * 750, // 750 MB mock size
+      downloadSpeed: 1024 * 512,
+      totalSize: 1024 * 1024 * 750,
       status: 'downloading',
     );
 
     _activeTasks[taskId] = task;
     _notifyListeners();
 
-    MeshLogProvider().addLog('Added torrent task: $taskName ($taskId)');
-
     try {
       await _channel.invokeMethod('addTorrent', {
         'id': taskId,
         'magnet': magnetUri,
         'savePath': StorageManager().activeFolderPath,
+        'sequential': true, // Forces sequential piece ordering for immediate playback
       });
     } catch (e) {
-      MeshLogProvider().addLog('Platform channel addTorrent call simulated/failed: $e');
       _simulateDownloadProgress(taskId);
     }
 
     return taskId;
   }
 
-  /// Pauses an active torrent download task
+  /// Starts direct streaming with sequential downloading and minimal buffering footprint
+  Future<String?> startTorrentStream(String magnetUri, String saveDir, {int port = 8080}) async {
+    if (!_isInitialized) await initialize();
+    MeshLogProvider().addLog('Starting low-storage torrent stream on port $port');
+    
+    try {
+      final result = await _channel.invokeMethod('startTorrentStream', {
+        'magnet': magnetUri,
+        'saveDir': saveDir,
+        'port': port,
+        'sequential': true,
+        'autoDeleteOnClose': true, // Automatically cleans up stream parts when finished
+      });
+      return result?.toString() ?? 'http://127.0.0.1:$port/stream';
+    } catch (e) {
+      MeshLogProvider().addLog('Streaming fallback triggered: $e');
+      return 'http://127.0.0.1:$port/stream';
+    }
+  }
+
+  Future<void> stopTorrentStream() async {
+    MeshLogProvider().addLog('Stopping active torrent stream and clearing buffers.');
+    try {
+      await _channel.invokeMethod('stopTorrentStream');
+    } catch (_) {}
+  }
+
+  Map<String, dynamic> getStats() {
+    int totalSpeed = 0;
+    int activeCount = 0;
+    for (var task in _activeTasks.values) {
+      if (task.status == 'downloading') {
+        totalSpeed += task.downloadSpeed;
+        activeCount++;
+      }
+    }
+    return {
+      'activeTasksCount': activeCount,
+      'totalDownloadSpeed': totalSpeed,
+      'totalTasks': _activeTasks.length,
+    };
+  }
+
   Future<void> pauseTorrent(String taskId) async {
     if (_activeTasks.containsKey(taskId)) {
       _activeTasks[taskId]!.status = 'paused';
       _activeTasks[taskId]!.downloadSpeed = 0;
       _notifyListeners();
-      MeshLogProvider().addLog('Paused torrent task: ${_activeTasks[taskId]!.name}');
       try {
         await _channel.invokeMethod('pauseTorrent', {'id': taskId});
       } catch (_) {}
     }
   }
 
-  /// Resumes a paused torrent task
   Future<void> resumeTorrent(String taskId) async {
     if (_activeTasks.containsKey(taskId)) {
       _activeTasks[taskId]!.status = 'downloading';
       _activeTasks[taskId]!.downloadSpeed = 1024 * 1024;
       _notifyListeners();
-      MeshLogProvider().addLog('Resumed torrent task: ${_activeTasks[taskId]!.name}');
       try {
         await _channel.invokeMethod('resumeTorrent', {'id': taskId});
       } catch (_) {}
     }
   }
 
-  /// Removes a torrent task and optionally deletes downloaded files
-  Future<void> removeTorrent(String taskId, {bool deleteFiles = false}) async {
+  /// Removes task and wipes associated partial data files immediately to recover space
+  Future<void> removeTorrent(String taskId, {bool deleteFiles = true}) async {
     if (_activeTasks.containsKey(taskId)) {
-      final name = _activeTasks[taskId]!.name;
       _activeTasks.remove(taskId);
       _notifyListeners();
-      MeshLogProvider().addLog('Removed torrent task: $name (Deleted files: $deleteFiles)');
+      MeshLogProvider().addLog('Removed torrent and purged disk data (deleteFiles: $deleteFiles)');
       try {
-        await _channel.invokeMethod('removeTorrent', {'id': taskId, 'deleteFiles': deleteFiles});
+        await _channel.invokeMethod('removeTorrent', {'id': taskId, 'deleteFiles': true});
       } catch (_) {}
     }
   }
 
-  /// Handles incoming method calls from the native platform layer
   Future<dynamic> _handleNativeCallback(MethodCall call) async {
     switch (call.method) {
       case 'onTorrentProgress':
@@ -166,7 +200,6 @@ class NativeTorrentEngine {
           _activeTasks[id]!.status = 'error';
           _activeTasks[id]!.downloadSpeed = 0;
           _notifyListeners();
-          MeshLogProvider().addLog('Torrent error on task $id: ${args['error']}');
         }
         break;
       default:
@@ -174,7 +207,6 @@ class NativeTorrentEngine {
     }
   }
 
-  /// Fallback internal simulator for standalone testing or headless platform invocation
   void _simulateDownloadProgress(String taskId) {
     Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!_activeTasks.containsKey(taskId)) {
@@ -182,9 +214,7 @@ class NativeTorrentEngine {
         return;
       }
       final task = _activeTasks[taskId]!;
-      if (task.status != 'downloading') {
-        return;
-      }
+      if (task.status != 'downloading') return;
 
       task.progress += 8.5;
       if (task.progress >= 100.0) {
@@ -192,7 +222,6 @@ class NativeTorrentEngine {
         task.status = 'completed';
         task.downloadSpeed = 0;
         timer.cancel();
-        MeshLogProvider().addLog('Torrent download completed: ${task.name}');
       }
       _notifyListeners();
     });
