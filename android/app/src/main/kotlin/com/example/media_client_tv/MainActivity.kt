@@ -4,6 +4,8 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.net.wifi.WifiManager
+import android.os.Environment
+import android.provider.Settings
 import android.widget.Toast
 import androidx.annotation.NonNull
 import androidx.core.content.FileProvider
@@ -37,6 +39,30 @@ class MainActivity: FlutterActivity() {
                     val message = call.argument<String>("message") ?: "Action completed"
                     Toast.makeText(applicationContext, message, Toast.LENGTH_SHORT).show()
                     result.success(true)
+                }
+                "checkStoragePermission" -> {
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                        result.success(Environment.isExternalStorageManager())
+                    } else {
+                        result.success(true)
+                    }
+                }
+                "requestStoragePermission" -> {
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                        try {
+                            val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+                                data = Uri.parse("package:$packageName")
+                            }
+                            startActivity(intent)
+                            result.success(true)
+                        } catch (e: Exception) {
+                            val intent = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+                            startActivity(intent)
+                            result.success(true)
+                        }
+                    } else {
+                        result.success(true)
+                    }
                 }
                 else -> {
                     result.notImplemented()
