@@ -113,11 +113,18 @@ jobs:
           rm -rf bittorrent_engine
           git clone --depth 1 https://github.com/jakerieger/Tori.git bittorrent_engine
 
-          # Strip out unit tests and Catch2 references to avoid test compilation failures on cross-compile
+          # Strip tests and patch 32-bit compatibility issues (__int128_t absence and missing <sstream>)
           cd bittorrent_engine
           find . -name "CMakeLists.txt" -exec sed -i '/Tests/d' {} +
           find . -name "CMakeLists.txt" -exec sed -i '/Catch2/d' {} +
           rm -rf Source/libtori/Tests tests Test
+
+          # Fix 128-bit types for 32-bit Android architectures in Common.hpp
+          sed -i 's/using i128 = __int128_t;/using i128 = int64_t;/g' Source/libtori/Common.hpp
+          sed -i 's/using u128 = __uint128_t;/using u128 = uint64_t;/g' Source/libtori/Common.hpp
+          
+          # Ensure sstream is included in Torrent.cpp
+          sed -i '1i #include <sstream>' Source/libtori/Torrent.cpp
 
           NDK_PATH=$(find $ANDROID_SDK_ROOT/ndk -maxdepth 1 -mindepth 1 | sort -V | tail -n 1)
 
