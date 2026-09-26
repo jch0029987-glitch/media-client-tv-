@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Media Client TV - Mesh Studio</title>
-    <script src="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.js"></script>
     <style>
         body { background-color: #0d1117; color: #c9d1d9; font-family: system-ui, -apple-system, sans-serif; }
         .tab-content { display: none; }
@@ -18,7 +18,7 @@
     <!-- Top Navigation Bar -->
     <header class="bg-gray-900 border-b border-gray-800 px-6 py-4 flex justify-between items-center">
         <div class="flex items-center space-x-3">
-            <div class="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
+            <div id="connection-indicator" class="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
             <h1 class="text-xl font-bold text-white">Media Client TV // Mesh Node</h1>
         </div>
         <nav class="flex space-x-2">
@@ -135,7 +135,7 @@ end</textarea>
                 <div class="bg-gray-900 p-6 rounded-lg border border-gray-800 space-y-4">
                     <h3 class="text-lg font-semibold text-white">Node Health</h3>
                     <div class="space-y-2 text-sm">
-                        <div class="flex justify-between py-1 border-b border-gray-800"><span class="text-gray-400">Server Status:</span> <span class="text-green-400 font-bold">Online</span></div>
+                        <div class="flex justify-between py-1 border-b border-gray-800"><span class="text-gray-400">Server Status:</span> <span id="health-status" class="text-green-400 font-bold">Online</span></div>
                         <div class="flex justify-between py-1 border-b border-gray-800"><span class="text-gray-400">Port:</span> <span class="text-white">9090</span></div>
                         <div class="flex justify-between py-1"><span class="text-gray-400">Runtime:</span> <span class="text-white">Flutter / Dart / LuaJIT</span></div>
                     </div>
@@ -157,6 +157,55 @@ end</textarea>
     </main>
 
     <script>
+        let ws;
+        const logContainer = document.getElementById('log-container');
+        const indicator = document.getElementById('connection-indicator');
+
+        function initWebSocket() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws`;
+            
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                indicator.classList.remove('bg-red-500');
+                indicator.classList.add('bg-green-500');
+                appendLog('[System] Connected to Mesh WebSocket stream.');
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    const payload = JSON.parse(event.data);
+                    if (payload.type === 'log') {
+                        appendLog(payload.data);
+                    } else if (payload.event === 'logs_snapshot' && payload.logs) {
+                        logContainer.innerHTML = payload.logs.map(log => `<div>${escapeHtml(log)}</div>`).join('');
+                        logContainer.scrollTop = logContainer.scrollHeight;
+                    }
+                } catch (_) {
+                    appendLog(event.data);
+                }
+            };
+
+            ws.onclose = () => {
+                indicator.classList.remove('bg-green-500');
+                indicator.classList.add('bg-red-500');
+                appendLog('[System] WebSocket disconnected. Reconnecting in 3s...');
+                setTimeout(initWebSocket, 3000);
+            };
+
+            ws.onerror = () => {
+                ws.close();
+            };
+        }
+
+        function appendLog(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            logContainer.appendChild(div);
+            logContainer.scrollTop = logContainer.scrollHeight;
+        }
+
         function switchTab(tabId) {
             document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
             ['plugins', 'skins', 'system'].forEach(id => {
@@ -183,13 +232,13 @@ end</textarea>
             const name = document.getElementById('plugin-name').value;
             const code = document.getElementById('plugin-code').value;
             try {
-                const res = await fetch('/api/plugins/save', {
+                const res = await fetch('/api/plugin/lua', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ name, code })
                 });
                 const data = await res.json();
-                if (res.ok) showStatus(`Success! Plugin saved to ${data.path}`);
+                if (res.ok) showStatus(`Success! Plugin script deployed.`);
                 else showStatus(`Error: ${data.error}`, true);
             } catch (e) {
                 showStatus(`Connection failed: ${e}`, true);
@@ -210,15 +259,14 @@ end</textarea>
 
         async function deploySkin() {
             const code = document.getElementById('skin-code').value;
-            const name = document.getElementById('skin-title').value.toLowerCase().replace(/\s+/g, '_') + '.xml';
             try {
-                const res = await fetch('/api/skin/save', {
+                const res = await fetch('/api/plugin/xml', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ name, code })
+                    body: JSON.stringify({ code })
                 });
                 const data = await res.json();
-                if (res.ok) showStatus(`Skin successfully applied and saved live!`);
+                if (res.ok) showStatus(`Skin XML manifest successfully applied!`);
                 else showStatus(`Error: ${data.error}`, true);
             } catch (e) {
                 showStatus(`Connection failed: ${e}`, true);
@@ -228,12 +276,12 @@ end</textarea>
         async function sendToast() {
             const message = document.getElementById('toast-msg').value;
             try {
-                await fetch('/api/system/toast', {
+                await fetch('/api/notify', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ message })
                 });
-                showStatus(`Toast triggered: "${message}"`);
+                showStatus(`Toast notification dispatched: "${message}"`);
             } catch (e) {
                 showStatus(`Failed to send toast: ${e}`, true);
             }
@@ -241,14 +289,12 @@ end</textarea>
 
         async function fetchLogs() {
             try {
-                const res = await fetch('/api/system/logs');
+                const res = await fetch('/api/logs');
                 if (res.ok) {
                     const data = await res.json();
-                    const container = document.getElementById('log-container');
                     if (data.logs && data.logs.length > 0) {
-                        container.innerHTML = data.logs.map(log => `<div>${escapeHtml(log)}</div>`).join('');
-                    } else {
-                        container.innerHTML = '<div class="text-gray-500">[System] No log entries yet.</div>';
+                        logContainer.innerHTML = data.logs.map(log => `<div>${escapeHtml(log)}</div>`).join('');
+                        logContainer.scrollTop = logContainer.scrollHeight;
                     }
                 }
             } catch (e) {
@@ -260,8 +306,8 @@ end</textarea>
             return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
         }
 
-        // Auto-poll logs every 2.5 seconds
-        setInterval(fetchLogs, 2500);
+        // Initialize WebSocket stream and fetch initial log state
+        initWebSocket();
         fetchLogs();
     </script>
 </body>
