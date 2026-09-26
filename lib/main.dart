@@ -540,7 +540,7 @@ void main() async {
   AirPlaySystem().initializeNativeDaemon();
   await AirPlaySystem().startNativeServer(7000);
 
-  MeshLogProvider().addLog("App fully booted up on Android 14 TV.");
+  MeshLogProvider().addLog("App fully booted up on Android TV.");
   runApp(const MediaClientApp());
 }
 
@@ -1103,9 +1103,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String _statusMessage = 'System up to date.';
   static const MethodChannel _platform = MethodChannel('com.example.media_client_tv/installer');
 
-  void _showConfigureStorageDialog(BuildContext context, SkinConfig skin) {
+  Future<void> _checkAndRequestStoragePermission() async {
+    try {
+      final bool hasPermission = await _platform.invokeMethod('checkStoragePermission') ?? true;
+      if (!hasPermission) {
+        MeshLogProvider().addLog("Storage permission not granted. Requesting MANAGE_EXTERNAL_STORAGE...");
+        await _platform.invokeMethod('requestStoragePermission');
+      }
+    } catch (e) {
+      MeshLogProvider().addLog("Failed to check/request storage permission: $e");
+    }
+  }
+
+  void _showConfigureStorageDialog(BuildContext context, SkinConfig skin) async {
+    await _checkAndRequestStoragePermission();
+
     final TextEditingController controller = TextEditingController(
-      text: StorageManager().linkedFolderPath ?? '',
+      text: StorageManager().linkedFolderPath ?? '/sdcard/media-client-tv',
     );
 
     showDialog(
@@ -1114,14 +1128,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
         return AlertDialog(
           backgroundColor: skin.cardBackgroundColor,
           title: Text('Configure Storage Folder', style: TextStyle(color: skin.textPrimaryColor)),
-          content: TextField(
-            controller: controller,
-            style: TextStyle(color: skin.textPrimaryColor),
-            decoration: InputDecoration(
-              hintText: '/storage/emulated/0/Download',
-              hintStyle: TextStyle(color: skin.textSecondaryColor),
-              enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: skin.primaryColor)),
-            ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextField(
+                controller: controller,
+                style: TextStyle(color: skin.textPrimaryColor),
+                decoration: InputDecoration(
+                  hintText: '/sdcard/media-client-tv',
+                  hintStyle: TextStyle(color: skin.textSecondaryColor),
+                  enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: skin.primaryColor)),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Note: Ensure "All Files Access" is enabled in system settings for full read/write access to shared storage paths.',
+                style: TextStyle(color: skin.textSecondaryColor, fontSize: 11),
+              ),
+            ],
           ),
           actions: [
             TextButton(
