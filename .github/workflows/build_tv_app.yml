@@ -58,7 +58,6 @@ jobs:
           echo "Compiling OpenSSL statically for Android..."
           cd openssl
           
-          # Use generic cross-compilation target with explicit Clang target flags to bypass NDK Perl script errors
           export CC="$TOOLCHAIN/clang --target=armv7a-linux-androideabi21"
           export AR="$TOOLCHAIN/llvm-ar"
           export RANLIB="$TOOLCHAIN/llvm-ranlib"
@@ -124,7 +123,11 @@ jobs:
                    -DANDROID_PLATFORM=android-21 \
                    -DCMAKE_C_FLAGS="-fPIC" \
                    -DCMAKE_CXX_FLAGS="-fPIC -std=c++20" \
-                   -DOPENSSL_ROOT_DIR="$WORKSPACE_ROOT/openssl_dist"
+                   -DOPENSSL_ROOT_DIR="$WORKSPACE_ROOT/openssl_dist" \
+                   -DOPENSSL_INCLUDE_DIR="$WORKSPACE_ROOT/openssl_dist/include" \
+                   -DOPENSSL_CRYPTO_LIBRARY="$WORKSPACE_ROOT/openssl_dist/lib/libcrypto.a" \
+                   -DOPENSSL_SSL_LIBRARY="$WORKSPACE_ROOT/openssl_dist/lib/libssl.a" \
+                   -DOPENSSL_USE_STATIC_LIBS=TRUE
           make -j$(nproc)
           
           cd "$WORKSPACE_ROOT"
