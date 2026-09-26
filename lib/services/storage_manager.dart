@@ -14,6 +14,7 @@ class StorageManager extends ChangeNotifier {
 
   String? _linkedFolderPath;
   String? get linkedFolderPath => _linkedFolderPath;
+  String? get activeFolderPath => _linkedFolderPath; // Alias for torrent engine references
 
   List<FileSystemEntity> _linkedFiles = [];
   List<FileSystemEntity> get linkedFiles => List.unmodifiable(_linkedFiles);
