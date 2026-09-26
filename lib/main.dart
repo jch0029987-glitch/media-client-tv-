@@ -402,12 +402,13 @@ void main() async {
   await SkinManager().loadSavedSkin();
   await SettingsManager().loadSavedSettings();
   
-  // Start background mesh services
+  // Start background mesh HTTP services
   await MeshBackgroundService().startServer();
 
   // Initialize and boot up the native AirPlay receiver daemon (`libairplay_daemon.so`)
+  // This acquires the Android Multicast Lock and starts advertising mDNS & RTSP services
   AirPlaySystem().initializeNativeDaemon();
-  AirPlaySystem().startNativeServer(7000);
+  await AirPlaySystem().startNativeServer(7000);
 
   runApp(const MediaClientApp());
 }
