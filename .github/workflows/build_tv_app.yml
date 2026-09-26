@@ -199,7 +199,7 @@ jobs:
             curl/dist/lib/libcurl.a \
             openssl_dist/lib/libssl.a \
             openssl_dist/lib/libcrypto.a \
-            LuaJIT/src/libluajit.a \
+            -LLuaJIT/src -lluajit \
             -o android/app/src/main/jniLibs/armeabi-v7a/libluajit.so \
             -llog -lz -lm -latomic -lc++
 
