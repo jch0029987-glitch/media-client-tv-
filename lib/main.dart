@@ -401,7 +401,14 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await SkinManager().loadSavedSkin();
   await SettingsManager().loadSavedSettings();
+  
+  // Start background mesh services
   await MeshBackgroundService().startServer();
+
+  // Initialize and boot up the native AirPlay receiver daemon (`libairplay_daemon.so`)
+  AirPlaySystem().initializeNativeDaemon();
+  AirPlaySystem().startNativeServer(7000);
+
   runApp(const MediaClientApp());
 }
 
