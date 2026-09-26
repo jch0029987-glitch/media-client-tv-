@@ -1,4 +1,4 @@
-import 'dart:io';
+Import 'dart:io';
 import 'dart:json'; // Note: standard Dart uses 'dart:convert' for json decode/encode
 import 'dart:convert';
 import 'dart:async';
@@ -20,6 +20,16 @@ typedef EvalLuaScriptDart = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> scriptC
 
 typedef CallLuaSearchC = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> scriptContent, ffi.Pointer<Utf8> queryTerm);
 typedef CallLuaSearchDart = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> scriptContent, ffi.Pointer<Utf8> queryTerm);
+
+// Define C function signature mapping for Native C BitTorrent Streaming Engine FFI bindings
+typedef StartTorrentStreamC = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> magnetLink, ffi.Pointer<Utf8> savePath, ffi.Int32 port);
+typedef StartTorrentStreamDart = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8> magnetLink, ffi.Pointer<Utf8> savePath, int port);
+
+typedef StopTorrentStreamC = ffi.Void Function();
+typedef StopTorrentStreamDart = void Function();
+
+typedef GetTorrentStatsC = ffi.Pointer<Utf8> Function();
+typedef GetTorrentStatsDart = ffi.Pointer<Utf8> Function();
 
 class ToastHelper {
   static const MethodChannel _platform = MethodChannel('com.example.media_client_tv/installer');
@@ -252,6 +262,81 @@ class LuaJitEngine {
   }
 }
 
+/// Native C BitTorrent Streaming Engine FFI Integration Layer
+class NativeTorrentEngine {
+  static final NativeTorrentEngine _instance = NativeTorrentEngine._internal();
+  factory NativeTorrentEngine() => _instance;
+  NativeTorrentEngine._internal();
+
+  late final ffi.DynamicLibrary _lib;
+  late final StartTorrentStreamDart _startStream;
+  late final StopTorrentStreamDart _stopStream;
+  late final GetTorrentStatsDart _getStats;
+  bool _initialized = false;
+
+  void initialize() {
+    if (_initialized) return;
+    try {
+      _lib = Platform.isAndroid
+          ? ffi.DynamicLibrary.open('libtorrent_engine.so')
+          : ffi.DynamicLibrary.process();
+
+      _startStream = _lib
+          .lookup<ffi.NativeFunction<StartTorrentStreamC>>('start_torrent_stream')
+          .asFunction();
+
+      _stopStream = _lib
+          .lookup<ffi.NativeFunction<StopTorrentStreamC>>('stop_torrent_stream')
+          .asFunction();
+
+      _getStats = _lib
+          .lookup<ffi.NativeFunction<GetTorrentStatsC>>('get_torrent_stats')
+          .asFunction();
+
+      _initialized = true;
+      MeshLogProvider().addLog("Native Torrent Engine initialized successfully.");
+    } catch (e) {
+      MeshLogProvider().addLog("Failed to load Native Torrent Engine library: $e");
+    }
+  }
+
+  String startTorrentStream(String magnetLink, String savePath, {int port = 8080}) {
+    if (!_initialized) initialize();
+    if (!_initialized) return '{"status": "error", "message": "Torrent engine not initialized"}';
+
+    final magnetPtr = magnetLink.toNativeUtf8();
+    final pathPtr = savePath.toNativeUtf8();
+    try {
+      final resultPtr = _startStream(magnetPtr, pathPtr, port);
+      return resultPtr.toDartString();
+    } finally {
+      calloc.free(magnetPtr);
+      calloc.free(pathPtr);
+    }
+  }
+
+  void stopTorrentStream() {
+    if (!_initialized) return;
+    try {
+      _stopStream();
+      MeshLogProvider().addLog("Torrent stream stopped.");
+    } catch (e) {
+      MeshLogProvider().addLog("Failed to stop torrent stream: $e");
+    }
+  }
+
+  Map<String, dynamic> getStats() {
+    if (!_initialized) return {'status': 'inactive'};
+    try {
+      final resultPtr = _getStats();
+      final jsonStr = resultPtr.toDartString();
+      return json.decode(jsonStr);
+    } catch (e) {
+      return {'status': 'error', 'message': e.toString()};
+    }
+  }
+}
+
 /// Comprehensive Kodi-Style XML Skin Configuration Model
 class SkinConfig {
   String skinName = "Default Kodi Skin";
@@ -450,6 +535,7 @@ class MeshBackgroundService {
   bool _isRunning = false;
   final int _port = 9090;
   final LuaJitEngine _luaEngine = LuaJitEngine();
+  final NativeTorrentEngine _torrentEngine = NativeTorrentEngine();
 
   bool get isRunning => _isRunning;
 
@@ -457,6 +543,7 @@ class MeshBackgroundService {
     if (_isRunning) return;
     try {
       _luaEngine.initialize();
+      _torrentEngine.initialize();
       _server = await HttpServer.bind(InternetAddress.anyIPv4, _port);
       _isRunning = true;
       MeshLogProvider().addLog("Background Mesh Server started successfully on port $_port");
@@ -483,6 +570,37 @@ class MeshBackgroundService {
         response.headers.contentType = ContentType.json;
         response.statusCode = HttpStatus.ok;
         response.write(json.encode({'logs': MeshLogProvider().logs}));
+      } else if (request.method == 'GET' && request.uri.path == '/api/torrent/stats') {
+        response.headers.contentType = ContentType.json;
+        response.statusCode = HttpStatus.ok;
+        response.write(json.encode(_torrentEngine.getStats()));
+      } else if (request.method == 'POST' && request.uri.path == '/api/torrent/start') {
+        response.headers.contentType = ContentType.json;
+        final content = await utf8.decoder.bind(request).join();
+        final data = json.decode(content);
+        final String magnet = data['magnet'] ?? '';
+        
+        if (magnet.isNotEmpty) {
+          final appDir = await getExternalStorageDirectory() ?? await getApplicationDocumentsDirectory();
+          final saveDir = '${appDir.path}/torrents';
+          await Directory(saveDir).create(recursive: true);
+
+          final resultStr = _torrentEngine.startTorrentStream(magnet, saveDir);
+          final resJson = json.decode(resultStr);
+
+          await ToastHelper.showToast('Torrent Stream Started via Mesh!');
+          response.statusCode = HttpStatus.ok;
+          response.write(json.encode(resJson));
+        } else {
+          response.statusCode = HttpStatus.badRequest;
+          response.write(json.encode({'error': 'Invalid or missing magnet link'}));
+        }
+      } else if (request.method == 'POST' && request.uri.path == '/api/torrent/stop') {
+        response.headers.contentType = ContentType.json;
+        _torrentEngine.stopTorrentStream();
+        await ToastHelper.showToast('Torrent Stream Stopped');
+        response.statusCode = HttpStatus.ok;
+        response.write(json.encode({'status': 'stopped'}));
       } else if (request.method == 'POST' && request.uri.path == '/api/storage/link') {
         response.headers.contentType = ContentType.json;
         final content = await utf8.decoder.bind(request).join();
@@ -599,6 +717,7 @@ void main() async {
   await SettingsManager().loadSavedSettings();
   await StorageManager().loadLinkedFolder(); // Automatically loads path and re-hydrates .lua plugins on startup
   
+  NativeTorrentEngine().initialize();
   await MeshBackgroundService().startServer();
 
   AirPlaySystem().initializeNativeDaemon();
@@ -650,6 +769,7 @@ class _MainScreenState extends State<MainScreen> {
   late final List<Widget> _screens = [
     const LibraryScreen(),
     const PluginHubScreen(),
+    const TorrentHubScreen(),
     AirPlayHubTab(airPlaySystem: _airPlaySystem),
     const SettingsScreen(),
   ];
@@ -682,7 +802,11 @@ class _MainScreenState extends State<MainScreen> {
                   ),
                   NavigationRailDestination(
                     icon: Icon(Icons.extension),
-                    label: Text('Plugin Hub'),
+                    label: Text('Plugins'),
+                  ),
+                  NavigationRailDestination(
+                    icon: Icon(Icons.download),
+                    label: Text('Torrent Hub'),
                   ),
                   NavigationRailDestination(
                     icon: Icon(Icons.cast),
@@ -733,6 +857,191 @@ class AirPlayHubTab extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class TorrentHubScreen extends StatefulWidget {
+  const TorrentHubScreen({super.key});
+
+  @override
+  State<TorrentHubScreen> createState() => _TorrentHubScreenState();
+}
+
+class _TorrentHubScreenState extends State<TorrentHubScreen> {
+  final TextEditingController _magnetController = TextEditingController();
+  Map<String, dynamic> _stats = {};
+  Timer? _pollTimer;
+  bool _isStreaming = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _pollTimer = Timer.periodic(const Duration(seconds: 2), (_) => _pollStats());
+  }
+
+  @override
+  void dispose() {
+    _pollTimer?.cancel();
+    _magnetController.dispose();
+    super.dispose();
+  }
+
+  void _pollStats() {
+    final stats = NativeTorrentEngine().getStats();
+    if (mounted) {
+      setState(() {
+        _stats = stats;
+        _isStreaming = stats['status'] == 'streaming' || stats['active'] == true;
+      });
+    }
+  }
+
+  Future<void> _startStream() async {
+    final magnet = _magnetController.text.trim();
+    if (magnet.isEmpty) {
+      await ToastHelper.showToast('Please enter a valid magnet link');
+      return;
+    }
+
+    final appDir = await getExternalStorageDirectory() ?? await getApplicationDocumentsDirectory();
+    final saveDir = '${appDir.path}/torrents';
+    await Directory(saveDir).create(recursive: true);
+
+    MeshLogProvider().addLog("Starting native torrent stream from UI...");
+    final resultStr = NativeTorrentEngine().startTorrentStream(magnet, saveDir, port: 8080);
+    try {
+      final res = json.decode(resultStr);
+      if (res['status'] == 'success' || res['stream_url'] != null) {
+        await ToastHelper.showToast('Torrent streaming initialized!');
+        final streamUrl = res['stream_url'] ?? 'http://127.0.0.1:8080/stream';
+        
+        // Optionally launch internal player automatically
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => PlayerScreen(streamUrl: streamUrl, title: 'Torrent Stream'),
+          ),
+        );
+      } else {
+        await ToastHelper.showToast('Failed to start torrent stream');
+      }
+    } catch (e) {
+      MeshLogProvider().addLog("Torrent start error: $e");
+    }
+  }
+
+  void _stopStream() {
+    NativeTorrentEngine().stopTorrentStream();
+    ToastHelper.showToast('Torrent stream stopped');
+    _pollStats();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: SkinManager(),
+      builder: (context, _) {
+        final skin = SkinManager().currentSkin;
+
+        return Padding(
+          padding: EdgeInsets.all(skin.contentPadding),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Native C BitTorrent Engine Hub',
+                style: TextStyle(fontSize: skin.headerFontSize, fontWeight: FontWeight.bold, color: skin.textPrimaryColor),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Stream media directly via magnet links using the zero-copy C libtorrent backend.',
+                style: TextStyle(fontSize: 14, color: skin.textSecondaryColor),
+              ),
+              const SizedBox(height: 24),
+              Card(
+                color: skin.cardBackgroundColor,
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Magnet Link Input', style: TextStyle(color: skin.primaryColor, fontWeight: FontWeight.bold, fontSize: 16)),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _magnetController,
+                        style: TextStyle(color: skin.textPrimaryColor, fontSize: 13),
+                        decoration: InputDecoration(
+                          hintText: 'magnet:?xt=urn:btih:...',
+                          hintStyle: TextStyle(color: skin.textSecondaryColor),
+                          enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: skin.primaryColor)),
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      Row(
+                        children: [
+                          ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(backgroundColor: skin.primaryColor),
+                            icon: const Icon(Icons.play_arrow),
+                            label: const Text('Start Stream'),
+                            onPressed: _startStream,
+                          ),
+                          const SizedBox(width: 12),
+                          ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
+                            icon: const Icon(Icons.stop),
+                            label: const Text('Stop Engine'),
+                            onPressed: _stopStream,
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 24),
+              Text('Live Engine Telemetry', style: TextStyle(color: skin.primaryColor, fontWeight: FontWeight.bold, fontSize: 18)),
+              const SizedBox(height: 12),
+              Expanded(
+                child: Card(
+                  color: skin.cardBackgroundColor,
+                  child: Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: ListView(
+                      children: [
+                        ListTile(
+                          title: const Text('Engine Status'),
+                          trailing: Text(_isStreaming ? 'STREAMING' : 'IDLE', style: TextStyle(color: _isStreaming ? Colors.greenAccent : skin.textSecondaryColor, fontWeight: FontWeight.bold)),
+                        ),
+                        const Divider(color: Colors.white24),
+                        ListTile(
+                          title: const Text('Connected Peers'),
+                          trailing: Text('${_stats['peers'] ?? 0}'),
+                        ),
+                        const Divider(color: Colors.white24),
+                        ListTile(
+                          title: const Text('Download Speed'),
+                          trailing: Text('${_stats['download_speed_kbps'] ?? 0} KB/s'),
+                        ),
+                        const Divider(color: Colors.white24),
+                        ListTile(
+                          title: const Text('Buffer Progress'),
+                          trailing: Text('${(_stats['progress'] ?? 0.0).toStringAsFixed(1)}%'),
+                        ),
+                        const Divider(color: Colors.white24),
+                        ListTile(
+                          title: const Text('Local Stream Endpoint'),
+                          trailing: Text('${_stats['endpoint'] ?? 'http://127.0.0.1:8080/stream'}', style: const TextStyle(fontFamily: 'monospace', fontSize: 12)),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
