@@ -52,6 +52,80 @@ class MeshLogProvider extends ChangeNotifier {
   }
 }
 
+/// Persistent Local Storage & Folder Link Manager
+class StorageManager extends ChangeNotifier {
+  static final StorageManager _instance = StorageManager._internal();
+  factory StorageManager() => _instance;
+  StorageManager._internal();
+
+  String? _linkedFolderPath;
+  String? get linkedFolderPath => _linkedFolderPath;
+
+  List<FileSystemEntity> _linkedFiles = [];
+  List<FileSystemEntity> get linkedFiles => List.unmodifiable(_linkedFiles);
+
+  Future<void> loadLinkedFolder() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _linkedFolderPath = prefs.getString('mesh_linked_folder_path');
+      if (_linkedFolderPath != null) {
+        await scanLinkedFolder();
+      }
+    } catch (e) {
+      MeshLogProvider().addLog("Failed to load linked folder: $e");
+    }
+  }
+
+  Future<void> linkFolder(String path) async {
+    _linkedFolderPath = path;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('mesh_linked_folder_path', path);
+      await scanLinkedFolder();
+      MeshLogProvider().addLog("Successfully linked storage folder: $path");
+      notifyListeners();
+    } catch (e) {
+      MeshLogProvider().addLog("Failed to link folder $path: $e");
+    }
+  }
+
+  Future<void> scanLinkedFolder() async {
+    if (_linkedFolderPath == null) return;
+    try {
+      final dir = Directory(_linkedFolderPath!);
+      if (await dir.exists()) {
+        _linkedFiles = dir.listSync(recursive: false, followLinks: false);
+        notifyListeners();
+        MeshLogProvider().addLog("Scanned linked folder: ${_linkedFiles.length} items found.");
+      } else {
+        _linkedFiles = [];
+        notifyListeners();
+        MeshLogProvider().addLog("Linked folder path does not exist on disk.");
+      }
+    } catch (e) {
+      MeshLogProvider().addLog("Error scanning linked folder: $e");
+    }
+  }
+
+  Future<bool> savePluginToLinkedFolder(String filename, String code) async {
+    if (_linkedFolderPath == null) return false;
+    try {
+      final dir = Directory(_linkedFolderPath!);
+      if (!await dir.exists()) {
+        await dir.create(recursive: true);
+      }
+      final file = File('${_linkedFolderPath!}/$filename');
+      await file.writeAsString(code);
+      await scanLinkedFolder();
+      MeshLogProvider().addLog("Saved plugin to linked folder: $filename");
+      return true;
+    } catch (e) {
+      MeshLogProvider().addLog("Failed to save plugin to linked folder: $e");
+      return false;
+    }
+  }
+}
+
 class LuaJitEngine {
   late final ffi.DynamicLibrary _lib;
   late final EvalLuaScriptDart _evalScript;
@@ -81,7 +155,6 @@ class LuaJitEngine {
     }
   }
 
-  /// Evaluates an arbitrary raw Lua script string directly
   String eval(String scriptContent) {
     if (!_initialized) initialize();
     if (!_initialized) return 'Error: Lua engine not initialized';
@@ -95,7 +168,6 @@ class LuaJitEngine {
     }
   }
 
-  /// Invokes the global 'search(query)' function inside a loaded Lua script
   String search(String scriptContent, String queryTerm) {
     if (!_initialized) initialize();
     
@@ -119,7 +191,6 @@ class LuaJitEngine {
 class SkinConfig {
   String skinName = "Default Kodi Skin";
   
-  // Colors
   Color primaryColor = Colors.blueAccent;
   Color backgroundColor = const Color(0xFF121212);
   Color surfaceColor = const Color(0xFF1E1E1E);
@@ -127,7 +198,6 @@ class SkinConfig {
   Color textPrimaryColor = Colors.white;
   Color textSecondaryColor = Colors.white70;
   
-  // Layout & UI Structure
   int gridColumns = 3;
   double cardCornerRadius = 8.0;
   double borderWidth = 3.0;
@@ -192,7 +262,6 @@ class SkinConfig {
   }
 }
 
-/// Persistent Reactive Skin Manager Provider
 class SkinManager extends ChangeNotifier {
   static final SkinManager _instance = SkinManager._internal();
   factory SkinManager() => _instance;
@@ -231,7 +300,6 @@ class SkinManager extends ChangeNotifier {
   }
 }
 
-/// Persistent Reactive Settings Manager Provider
 class SettingsManager extends ChangeNotifier {
   static final SettingsManager _instance = SettingsManager._internal();
   factory SettingsManager() => _instance;
@@ -266,7 +334,6 @@ class SettingsManager extends ChangeNotifier {
   }
 }
 
-/// Reactive State Manager for Dynamic Plugin Catalog & Structured Multi-Row Shelves
 class LibraryPluginProvider extends ChangeNotifier {
   static final LibraryPluginProvider _instance = LibraryPluginProvider._internal();
   factory LibraryPluginProvider() => _instance;
@@ -350,6 +417,21 @@ class MeshBackgroundService {
         response.headers.contentType = ContentType.json;
         response.statusCode = HttpStatus.ok;
         response.write(json.encode({'logs': MeshLogProvider().logs}));
+      } else if (request.method == 'POST' && request.uri.path == '/api/storage/link') {
+        response.headers.contentType = ContentType.json;
+        final content = await utf8.decoder.bind(request).join();
+        final data = json.decode(content);
+        final String folderPath = data['path'] ?? '';
+
+        if (folderPath.isNotEmpty) {
+          await StorageManager().linkFolder(folderPath);
+          await ToastHelper.showToast('Storage Folder Linked Successfully!');
+          response.statusCode = HttpStatus.ok;
+          response.write(json.encode({'status': 'success', 'path': folderPath}));
+        } else {
+          response.statusCode = HttpStatus.badRequest;
+          response.write(json.encode({'error': 'Invalid path'}));
+        }
       } else if (request.method == 'POST' && request.uri.path == '/api/plugins/save') {
         response.headers.contentType = ContentType.json;
         final content = await utf8.decoder.bind(request).join();
@@ -358,46 +440,44 @@ class MeshBackgroundService {
         final String filename = data['name'] ?? 'plugin.lua';
         final String luaCode = data['code'] ?? '';
         
-        final appDir = await getApplicationDocumentsDirectory();
-        final pluginDir = Directory('${appDir.path}/plugins');
-        if (!await pluginDir.exists()) await pluginDir.create(recursive: true);
-        
-        final file = File('${pluginDir.path}/$filename');
-        await file.writeAsString(luaCode);
+        bool success = false;
+        String targetPath = '';
 
-        LibraryPluginProvider().registerLoadedPlugin(filename, luaCode);
-        MeshLogProvider().addLog("Saved and registered Lua plugin: $filename");
+        if (StorageManager().linkedFolderPath != null) {
+          success = await StorageManager().savePluginToLinkedFolder(filename, luaCode);
+          targetPath = '${StorageManager().linkedFolderPath}/$filename';
+        } else {
+          final appDir = await getApplicationDocumentsDirectory();
+          final pluginDir = Directory('${appDir.path}/plugins');
+          if (!await pluginDir.exists()) await pluginDir.create(recursive: true);
+          
+          final file = File('${pluginDir.path}/$filename');
+          await file.writeAsString(luaCode);
+          targetPath = file.path;
+          success = true;
+        }
 
-        try {
-          final executionResult = _luaEngine.eval(luaCode);
-          if (executionResult.isNotEmpty && !executionResult.startsWith('Error')) {
-            final parsedOutput = json.decode(executionResult);
-            LibraryPluginProvider().injectPluginPayload(parsedOutput);
+        if (success) {
+          LibraryPluginProvider().registerLoadedPlugin(filename, luaCode);
+          MeshLogProvider().addLog("Saved and registered Lua plugin: $filename");
+
+          try {
+            final executionResult = _luaEngine.eval(luaCode);
+            if (executionResult.isNotEmpty && !executionResult.startsWith('Error')) {
+              final parsedOutput = json.decode(executionResult);
+              LibraryPluginProvider().injectPluginPayload(parsedOutput);
+            }
+          } catch (e) {
+            MeshLogProvider().addLog("Lua execution evaluation notice: $e");
           }
-        } catch (e) {
-          MeshLogProvider().addLog("Lua execution evaluation notice: $e");
+
+          await ToastHelper.showToast('Lua Plugin $filename Deployed!');
+          response.statusCode = HttpStatus.ok;
+          response.write(json.encode({'status': 'success', 'path': targetPath}));
+        } else {
+          response.statusCode = HttpStatus.internalServerError;
+          response.write(json.encode({'error': 'Failed to save plugin file'}));
         }
-
-        await ToastHelper.showToast('Lua Plugin $filename Deployed Globally!');
-        response.statusCode = HttpStatus.ok;
-        response.write(json.encode({'status': 'success', 'path': file.path}));
-      } else if (request.method == 'POST' && request.uri.path == '/api/plugins/test') {
-        response.headers.contentType = ContentType.json;
-        final content = await utf8.decoder.bind(request).join();
-        final data = json.decode(content);
-        final String code = data['code'] ?? '';
-
-        String evalResult;
-        try {
-          evalResult = _luaEngine.eval(code);
-          MeshLogProvider().addLog("Lua sandbox test executed successfully.");
-        } catch (e) {
-          evalResult = 'Error: ${e.toString()}';
-          MeshLogProvider().addLog("Lua sandbox test error: $e");
-        }
-
-        response.statusCode = HttpStatus.ok;
-        response.write(json.encode({'status': 'success', 'output': evalResult}));
       } else if (request.method == 'POST' && request.uri.path == '/api/skin/save') {
         response.headers.contentType = ContentType.json;
         final content = await utf8.decoder.bind(request).join();
@@ -419,17 +499,6 @@ class MeshBackgroundService {
 
         response.statusCode = HttpStatus.ok;
         response.write(json.encode({'status': 'success', 'path': file.path}));
-      } else if (request.method == 'POST' && request.uri.path == '/api/settings/save') {
-        response.headers.contentType = ContentType.json;
-        final content = await utf8.decoder.bind(request).join();
-        final data = json.decode(content);
-        
-        await SettingsManager().updateSettings(data);
-        MeshLogProvider().addLog("Updated app settings from web mesh UI.");
-        await ToastHelper.showToast('Settings Updated via Mesh Web UI!');
-
-        response.statusCode = HttpStatus.ok;
-        response.write(json.encode({'status': 'success'}));
       } else if (request.method == 'POST' && request.uri.path == '/api/system/toast') {
         response.headers.contentType = ContentType.json;
         final content = await utf8.decoder.bind(request).join();
@@ -440,15 +509,6 @@ class MeshBackgroundService {
         MeshLogProvider().addLog("Broadcasted toast: $message");
         response.statusCode = HttpStatus.ok;
         response.write(json.encode({'status': 'success'}));
-      } else if (request.method == 'POST' && request.uri.path == '/api/system/remote') {
-        response.headers.contentType = ContentType.json;
-        final content = await utf8.decoder.bind(request).join();
-        final data = json.decode(content);
-        final String action = data['action'] ?? '';
-
-        MeshLogProvider().addLog("Remote action received from mesh: $action");
-        response.statusCode = HttpStatus.ok;
-        response.write(json.encode({'status': 'success', 'action': action}));
       } else {
         response.headers.contentType = ContentType.json;
         response.statusCode = HttpStatus.notFound;
@@ -471,6 +531,7 @@ void main() async {
   
   await SkinManager().loadSavedSkin();
   await SettingsManager().loadSavedSettings();
+  await StorageManager().loadLinkedFolder();
   
   // Start background mesh HTTP services
   await MeshBackgroundService().startServer();
@@ -773,7 +834,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 child: _isLoading
                     ? Center(child: CircularProgressIndicator(color: skin.primaryColor))
                     : (_activeCatalogUrl == 'local://lua_plugin' && _currentDynamicRows.isNotEmpty)
-                        // Render Dynamic Multi-Row Shelves Engine
                         ? ListView.builder(
                             itemCount: _currentDynamicRows.length,
                             itemBuilder: (context, rowIndex) {
@@ -937,10 +997,12 @@ class PluginHubScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      listenable: Listenable.merge([SkinManager(), LibraryPluginProvider()]),
+      listenable: Listenable.merge([SkinManager(), LibraryPluginProvider(), StorageManager()]),
       builder: (context, _) {
         final skin = SkinManager().currentSkin;
         final loadedPlugins = LibraryPluginProvider().loadedPlugins;
+        final linkedFolder = StorageManager().linkedFolderPath;
+        final linkedFiles = StorageManager().linkedFiles;
 
         return Padding(
           padding: EdgeInsets.all(skin.contentPadding),
@@ -948,44 +1010,78 @@ class PluginHubScreen extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Plugin & Mesh Server Hub',
+                'Plugin & Mesh Storage Hub',
                 style: TextStyle(fontSize: skin.headerFontSize, fontWeight: FontWeight.bold, color: skin.textPrimaryColor),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 8),
               Text(
-                'Access & push Lua plugins or XML skins via http://<DEVICE_IP>:9090',
-                style: TextStyle(fontSize: 16, color: skin.textSecondaryColor),
+                linkedFolder != null ? 'Linked Folder: $linkedFolder' : 'No storage folder linked yet.',
+                style: TextStyle(fontSize: 14, color: skin.primaryColor),
               ),
-              const SizedBox(height: 24),
-              Text(
-                'Loaded Active Plugins (${loadedPlugins.length})',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: skin.primaryColor),
-              ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 16),
               Expanded(
-                child: loadedPlugins.isEmpty
-                    ? Center(
-                        child: Text(
-                          'No plugins loaded yet.\nPush a Lua script from the web mesh UI.',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(color: skin.textSecondaryColor),
-                        ),
-                      )
-                    : ListView.builder(
-                        itemCount: loadedPlugins.length,
-                        itemBuilder: (context, index) {
-                          final plugin = loadedPlugins[index];
-                          return Card(
-                            color: skin.cardBackgroundColor,
-                            margin: const EdgeInsets.only(bottom: 12),
-                            child: ListTile(
-                              leading: Icon(Icons.extension, color: skin.primaryColor),
-                              title: Text(plugin['name'] ?? 'Plugin', style: TextStyle(color: skin.textPrimaryColor, fontWeight: FontWeight.bold)),
-                              subtitle: Text('Deployed: ${plugin['time']}', style: TextStyle(color: skin.textSecondaryColor, fontSize: 12)),
-                            ),
-                          );
-                        },
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Loaded Active Plugins (${loadedPlugins.length})', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: skin.textPrimaryColor)),
+                          const SizedBox(height: 12),
+                          Expanded(
+                            child: loadedPlugins.isEmpty
+                                ? Center(child: Text('No active plugins loaded.', style: TextStyle(color: skin.textSecondaryColor)))
+                                : ListView.builder(
+                                    itemCount: loadedPlugins.length,
+                                    itemBuilder: (context, index) {
+                                      final plugin = loadedPlugins[index];
+                                      return Card(
+                                        color: skin.cardBackgroundColor,
+                                        margin: const EdgeInsets.only(bottom: 12),
+                                        child: ListTile(
+                                          leading: Icon(Icons.extension, color: skin.primaryColor),
+                                          title: Text(plugin['name'] ?? 'Plugin', style: TextStyle(color: skin.textPrimaryColor, fontWeight: FontWeight.bold)),
+                                          subtitle: Text('Deployed: ${plugin['time']}', style: TextStyle(color: skin.textSecondaryColor, fontSize: 12)),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                          ),
+                        ],
                       ),
+                    ),
+                    const SizedBox(width: 24),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Linked Directory Contents (${linkedFiles.length})', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: skin.textPrimaryColor)),
+                          const SizedBox(height: 12),
+                          Expanded(
+                            child: linkedFiles.isEmpty
+                                ? Center(child: Text('Folder is empty or unlinked.', style: TextStyle(color: skin.textSecondaryColor)))
+                                : ListView.builder(
+                                    itemCount: linkedFiles.length,
+                                    itemBuilder: (context, index) {
+                                      final file = linkedFiles[index];
+                                      final name = file.path.split('/').last;
+                                      return Card(
+                                        color: skin.cardBackgroundColor,
+                                        margin: const EdgeInsets.only(bottom: 8),
+                                        child: ListTile(
+                                          leading: Icon(Icons.insert_drive_file, color: skin.textSecondaryColor),
+                                          title: Text(name, style: TextStyle(color: skin.textPrimaryColor, fontSize: 14)),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
@@ -1006,6 +1102,50 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _checking = false;
   String _statusMessage = 'System up to date.';
   static const MethodChannel _platform = MethodChannel('com.example.media_client_tv/installer');
+
+  void _showConfigureStorageDialog(BuildContext context, SkinConfig skin) {
+    final TextEditingController controller = TextEditingController(
+      text: StorageManager().linkedFolderPath ?? '',
+    );
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: skin.cardBackgroundColor,
+          title: Text('Configure Storage Folder', style: TextStyle(color: skin.textPrimaryColor)),
+          content: TextField(
+            controller: controller,
+            style: TextStyle(color: skin.textPrimaryColor),
+            decoration: InputDecoration(
+              hintText: '/storage/emulated/0/Download',
+              hintStyle: TextStyle(color: skin.textSecondaryColor),
+              enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: skin.primaryColor)),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('Cancel', style: TextStyle(color: skin.textSecondaryColor)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: skin.primaryColor),
+              onPressed: () async {
+                final newPath = controller.text.trim();
+                if (newPath.isNotEmpty) {
+                  await StorageManager().linkFolder(newPath);
+                  await ToastHelper.showToast('Storage Folder Updated!');
+                }
+                Navigator.pop(context);
+                setState(() {});
+              },
+              child: const Text('Save'),
+            ),
+          ],
+        );
+      },
+    );
+  }
 
   Future<void> _handleCheckForUpdate() async {
     setState(() {
@@ -1086,10 +1226,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      listenable: Listenable.merge([SkinManager(), SettingsManager()]),
+      listenable: Listenable.merge([SkinManager(), SettingsManager(), StorageManager()]),
       builder: (context, _) {
         final skin = SkinManager().currentSkin;
         final customSettings = SettingsManager().customSettings;
+        final linkedFolder = StorageManager().linkedFolderPath ?? 'Not set';
 
         return Padding(
           padding: EdgeInsets.all(skin.contentPadding),
@@ -1098,6 +1239,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
               Text(
                 'Settings & System Updates',
                 style: TextStyle(fontSize: skin.headerFontSize, fontWeight: FontWeight.bold, color: skin.textPrimaryColor),
+              ),
+              const SizedBox(height: 24),
+              Card(
+                color: skin.cardBackgroundColor,
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text('Linked Storage Path', style: TextStyle(color: skin.primaryColor, fontWeight: FontWeight.bold, fontSize: 16)),
+                          ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(backgroundColor: skin.primaryColor),
+                            icon: const Icon(Icons.edit, size: 16),
+                            label: const Text('Configure'),
+                            onPressed: () => _showConfigureStorageDialog(context, skin),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text(linkedFolder, style: TextStyle(color: skin.textPrimaryColor, fontFamily: 'monospace', fontSize: 13)),
+                      const SizedBox(height: 8),
+                      Text('Configure paths on-device here or remotely via your web mesh dashboard on port 9090.', style: TextStyle(color: skin.textSecondaryColor, fontSize: 12)),
+                    ],
+                  ),
+                ),
               ),
               const SizedBox(height: 24),
               if (customSettings.isNotEmpty) ...[
