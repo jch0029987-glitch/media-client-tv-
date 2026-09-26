@@ -17,37 +17,37 @@ void main() async {
   runZonedGuarded(() async {
     WidgetsFlutterBinding.ensureInitialized();
     
-    // Lock orientation and set immersive mode for Android TV
+    // Lock orientation and enable immersive mode optimized for Android TV
     await SystemChrome.setPreferredOrientations([
       DeviceOrientation.landscapeLeft,
       DeviceOrientation.landscapeRight,
     ]);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
 
-    MeshLogProvider().addLog("App initialization started.");
+    MeshLogProvider().addLog("Media Client TV boot sequence initiated.");
     
-    // Global error handler redirection to mesh logs
+    // Redirect unhandled Flutter errors into the local mesh log buffer
     FlutterError.onError = (FlutterErrorDetails details) {
       FlutterError.presentError(details);
       MeshLogProvider().addLog('Flutter Error: ${details.exception}');
     };
 
-    // Load saved application state & preferences
+    // Load persisted state, themes, and user configurations
     await SkinManager().loadSavedSkin();
     await SettingsManager().loadSavedSettings();
     await StorageManager().loadLinkedFolder(); 
     
-    // Initialize native engines and background daemons
+    // Initialize native C engines and background daemons
     NativeTorrentEngine().initialize();
     await MeshBackgroundService().startServer();
 
     AirPlaySystem().initializeNativeDaemon();
     await AirPlaySystem().startNativeServer(7000);
 
-    // Run background OTA update check against repository releases
+    // Trigger background OTA update checks against repository releases
     await UpdateManager().initializeAndCheckForUpdates();
 
-    MeshLogProvider().addLog("App fully booted up on Android TV.");
+    MeshLogProvider().addLog("All background services online. Launching UI root.");
     runApp(const MediaClientApp());
   }, (error, stackTrace) {
     MeshLogProvider().addLog('Uncaught Zone Error: $error');
