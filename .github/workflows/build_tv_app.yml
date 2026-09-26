@@ -113,10 +113,15 @@ jobs:
           rm -rf bittorrent_engine
           git clone --depth 1 https://github.com/jakerieger/Tori.git bittorrent_engine
 
+          # Strip out unit tests and Catch2 references to avoid test compilation failures on cross-compile
+          cd bittorrent_engine
+          find . -name "CMakeLists.txt" -exec sed -i '/Tests/d' {} +
+          find . -name "CMakeLists.txt" -exec sed -i '/Catch2/d' {} +
+          rm -rf Source/libtori/Tests tests Test
+
           NDK_PATH=$(find $ANDROID_SDK_ROOT/ndk -maxdepth 1 -mindepth 1 | sort -V | tail -n 1)
 
           echo "Compiling BitTorrent engine source files..."
-          cd bittorrent_engine
           mkdir -p build && cd build
           cmake .. -DCMAKE_TOOLCHAIN_FILE="$NDK_PATH/build/cmake/android.toolchain.cmake" \
                    -DANDROID_ABI=armeabi-v7a \
