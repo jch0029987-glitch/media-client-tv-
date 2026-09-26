@@ -16,6 +16,17 @@
 // Declare the external cjson loading function provided by the cjson library module
 int luaopen_cjson(lua_State *L);
 
+// Declare external C++ functions from the Tori BitTorrent engine (libtori.a)
+#ifdef __cplusplus
+extern "C" {
+#endif
+    int tori_init_session(const char* magnet_uri);
+    void tori_stop_session(void);
+    const char* tori_get_stats_json(void);
+#ifdef __cplusplus
+}
+#endif
+
 // Helper struct for libcurl memory chunk storage
 struct MemoryStruct {
     char *memory;
@@ -48,9 +59,6 @@ static int l_http_get(lua_State *L) {
     chunk.memory = malloc(1);
     chunk.size = 0;
 
-    // NOTE: Removed curl_global_init() and curl_global_cleanup() from here.
-    // Calling them per-request destroys thread locks and causes crashes/freezes.
-
     curl_handle = curl_easy_init();
     if (!curl_handle) {
         free(chunk.memory);
@@ -62,22 +70,20 @@ static int l_http_get(lua_State *L) {
     curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, WriteMemoryCallback);
     curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, (void *)&chunk);
     
-    // --- STABILITY & TIMEOUT OPTIONS (Prevents Freezes) ---
-    curl_easy_setopt(curl_handle, CURLOPT_CONNECTTIMEOUT, 3L); // Fail fast if TCP handshake takes > 3 seconds
-    curl_easy_setopt(curl_handle, CURLOPT_TIMEOUT, 6L);        // Hard cap total transfer time to 6 seconds
-    curl_easy_setopt(curl_handle, CURLOPT_NOSIGNAL, 1L);       // Thread-safety for multi-threaded environments
+    // --- STABILITY & TIMEOUT OPTIONS ---
+    curl_easy_setopt(curl_handle, CURLOPT_CONNECTTIMEOUT, 3L);
+    curl_easy_setopt(curl_handle, CURLOPT_TIMEOUT, 6L);
+    curl_easy_setopt(curl_handle, CURLOPT_NOSIGNAL, 1L);
 
-    // --- BROWSER HEADERS (Avoids silent Cloudflare blocking/tarpitting) ---
+    // --- BROWSER HEADERS ---
     struct curl_slist *headers = NULL;
     headers = curl_slist_append(headers, "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
     headers = curl_slist_append(headers, "Accept: application/json");
     curl_easy_setopt(curl_handle, CURLOPT_HTTPHEADER, headers);
 
-    // Follow HTTP/HTTPS redirects automatically
     curl_easy_setopt(curl_handle, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl_handle, CURLOPT_MAXREDIRS, 3L);
 
-    // Bypass SSL certificate checks for embedded Android TV environment compatibility
     curl_easy_setopt(curl_handle, CURLOPT_SSL_VERIFYPEER, 0L);
     curl_easy_setopt(curl_handle, CURLOPT_SSL_VERIFYHOST, 0L);
 
@@ -95,7 +101,7 @@ static int l_http_get(lua_State *L) {
     curl_easy_cleanup(curl_handle);
     free(chunk.memory);
 
-    return 1; // Number of return values pushed onto the Lua stack
+    return 1;
 }
 
 // Helper to initialize standard libs, custom http_get, and cjson module
@@ -103,12 +109,11 @@ static void init_lua_environment(lua_State *L) {
     luaL_openlibs(L);
     lua_register(L, "http_get", l_http_get);
 
-    // Register cjson into package.preload so require("cjson") works natively in LuaJIT
     lua_getglobal(L, "package");
     lua_getfield(L, -1, "preload");
     lua_pushcfunction(L, luaopen_cjson);
     lua_setfield(L, -2, "cjson");
-    lua_pop(L, 2); // Remove package and preload tables from the stack
+    lua_pop(L, 2);
 }
 
 // Original evaluator for direct script execution
@@ -183,4 +188,23 @@ EXPORT const char* call_lua_search(const char* script_content, const char* query
 
     lua_close(L);
     return res_buf;
+}
+
+// --- Torrents FFI Export Bindings ---
+
+EXPORT int bridge_start_torrent(const char* magnet_uri) {
+    if (!magnet_uri) return -1;
+    return tori_init_session(magnet_uri);
+}
+
+EXPORT void bridge_stop_torrent(void) {
+    tori_stop_session();
+}
+
+EXPORT const char* bridge_get_torrent_stats(void) {
+    const char* stats = tori_get_stats_json();
+    if (!stats) {
+        return "{\"status\":\"idle\",\"peers\":0,\"download_speed\":0}";
+    }
+    return stats;
 }
