@@ -52,23 +52,24 @@ jobs:
           echo "Using Android NDK at: $NDK_PATH"
           
           TOOLCHAIN="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin"
-          export PATH="$TOOLCHAIN:$PATH"
-          export ANDROID_NDK_HOME="$NDK_PATH"
-
           WORKSPACE_ROOT="$PWD"
           OPENSSL_PREFIX="$WORKSPACE_ROOT/openssl_dist"
 
           echo "Compiling OpenSSL statically for Android..."
           cd openssl
           
-          # OpenSSL 3 requires ANDROID_NDK_HOME and clang available on PATH
-          CC=clang ./Configure android-arm \
-                    -D__ANDROID_API__=21 \
+          # Use generic cross-compilation target with explicit Clang target flags to bypass NDK Perl script errors
+          export CC="$TOOLCHAIN/clang --target=armv7a-linux-androideabi21"
+          export AR="$TOOLCHAIN/llvm-ar"
+          export RANLIB="$TOOLCHAIN/llvm-ranlib"
+
+          ./Configure linux-generic32 \
                     --prefix="$OPENSSL_PREFIX" \
                     no-shared \
                     no-tests \
-                    no-engine
-                    
+                    no-engine \
+                    -D__ANDROID_API__=21
+
           make -j$(nproc)
           make install
           
@@ -78,10 +79,7 @@ jobs:
           cd curl
           autoreconf -fi
           
-          export CC="$TOOLCHAIN/clang --target=armv7a-linux-androideabi21"
-          export AR="$TOOLCHAIN/llvm-ar"
           export AS="$TOOLCHAIN/llvm-as"
-          export RANLIB="$TOOLCHAIN/llvm-ranlib"
           export STRIP="$TOOLCHAIN/llvm-strip"
 
           ./configure --host=arm-linux-androideabi \
