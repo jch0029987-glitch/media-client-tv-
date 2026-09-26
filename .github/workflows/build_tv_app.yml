@@ -127,7 +127,11 @@ jobs:
                    -DOPENSSL_INCLUDE_DIR="$WORKSPACE_ROOT/openssl_dist/include" \
                    -DOPENSSL_CRYPTO_LIBRARY="$WORKSPACE_ROOT/openssl_dist/lib/libcrypto.a" \
                    -DOPENSSL_SSL_LIBRARY="$WORKSPACE_ROOT/openssl_dist/lib/libssl.a" \
-                   -DOPENSSL_USE_STATIC_LIBS=TRUE
+                   -DOPENSSL_USE_STATIC_LIBS=TRUE \
+                   -DCURL_ROOT="$WORKSPACE_ROOT/curl/dist" \
+                   -DCURL_INCLUDE_DIR="$WORKSPACE_ROOT/curl/dist/include" \
+                   -DCURL_LIBRARY="$WORKSPACE_ROOT/curl/dist/lib/libcurl.a" \
+                   -DCURL_USE_STATIC_LIBS=TRUE
           make -j$(nproc)
           
           cd "$WORKSPACE_ROOT"
