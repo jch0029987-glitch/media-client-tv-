@@ -187,7 +187,7 @@ jobs:
 
           echo "Compiling unified native libluajit.so with libcurl, LuaJIT, CJSON, and BitTorrent Engine..."
           $TOOLCHAIN/clang++ --target=armv7a-linux-androideabi21 -shared -fPIC \
-            -std=c++20 -x c++ -Dthread_local=_Thread_local \
+            -std=c++20 -Dthread_local=_Thread_local \
             -Icurl/dist/include \
             -Iopenssl_dist/include \
             -ILuaJIT/src \
@@ -195,12 +195,14 @@ jobs:
             -Ibittorrent_engine/include \
             android/app/src/main/cpp/bridge.c \
             lua-cjson/strbuf.o lua-cjson/fpconv.o lua-cjson/lua_cjson.o \
+            -o android/app/src/main/jniLibs/armeabi-v7a/libluajit.so \
+            -Wl,--start-group \
             bittorrent_engine/build/Source/libtori/libtori.a \
             curl/dist/lib/libcurl.a \
             openssl_dist/lib/libssl.a \
             openssl_dist/lib/libcrypto.a \
+            -Wl,--end-group \
             -LLuaJIT/src -lluajit \
-            -o android/app/src/main/jniLibs/armeabi-v7a/libluajit.so \
             -llog -lz -lm -latomic -lc++
 
           ls -lh android/app/src/main/jniLibs/armeabi-v7a/libluajit.so
