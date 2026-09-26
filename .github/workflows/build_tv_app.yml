@@ -134,7 +134,7 @@ jobs:
                    -DANDROID_ABI=armeabi-v7a \
                    -DANDROID_PLATFORM=android-21 \
                    -DCMAKE_C_FLAGS="-fPIC" \
-                   -DCMAKE_CXX_FLAGS="-fPIC -std=c++20" \
+                   -DCMAKE_CXX_FLAGS="-fPIC -std=c++20 -lz" \
                    -DOPENSSL_ROOT_DIR="$WORKSPACE_ROOT/openssl_dist" \
                    -DOPENSSL_INCLUDE_DIR="$WORKSPACE_ROOT/openssl_dist/include" \
                    -DOPENSSL_CRYPTO_LIBRARY="$WORKSPACE_ROOT/openssl_dist/lib/libcrypto.a" \
