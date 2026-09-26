@@ -58,7 +58,6 @@ jobs:
           export RANLIB="$TOOLCHAIN/llvm-ranlib"
           export STRIP="$TOOLCHAIN/llvm-strip"
 
-          # Define workspace absolute base for distributions
           WORKSPACE_ROOT="$PWD"
           MBEDTLS_PREFIX="$WORKSPACE_ROOT/mbedtls_dist"
 
@@ -75,7 +74,6 @@ jobs:
           make -j$(nproc)
           make install
           
-          # Return explicitly to the workspace root
           cd "$WORKSPACE_ROOT"
 
           echo "Configuring libcurl with mbedTLS..."
@@ -103,10 +101,32 @@ jobs:
           make -j$(nproc)
           make install
           
-          # Return explicitly to the workspace root
           cd "$WORKSPACE_ROOT"
 
-      - name: Build LuaJIT, CJSON & Compile Unified Native Bridge
+      - name: Clone & Compile BitTorrent Engine for armeabi-v7a
+        run: |
+          WORKSPACE_ROOT="$PWD"
+
+          echo "Cloning lightweight BitTorrent engine..."
+          rm -rf bittorrent_engine
+          git clone --depth 1 https://github.com/jakerieger/Tori.git bittorrent_engine
+
+          NDK_PATH=$(find $ANDROID_SDK_ROOT/ndk -maxdepth 1 -mindepth 1 | sort -V | tail -n 1)
+          TOOLCHAIN="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin"
+
+          echo "Compiling BitTorrent engine source files..."
+          cd bittorrent_engine
+          mkdir -p build && cd build
+          cmake .. -DCMAKE_TOOLCHAIN_FILE="$NDK_PATH/build/cmake/android.toolchain.cmake" \
+                   -DANDROID_ABI=armeabi-v7a \
+                   -DANDROID_PLATFORM=android-21 \
+                   -DCMAKE_C_FLAGS="-fPIC" \
+                   -DCMAKE_CXX_FLAGS="-fPIC -std=c++20"
+          make -j$(nproc)
+          
+          cd "$WORKSPACE_ROOT"
+
+      - name: Build LuaJIT, CJSON & Compile Unified Native Bridge with Torrent Engine
         run: |
           WORKSPACE_ROOT="$PWD"
 
@@ -115,7 +135,6 @@ jobs:
           git clone https://github.com/LuaJIT/LuaJIT.git
           git clone https://github.com/mpx/lua-cjson.git
           
-          # Patch lua-cjson to avoid duplicate static declaration of luaL_setfuncs with LuaJIT
           cd lua-cjson
           sed -i '/static void luaL_setfuncs/,/^\}/d' lua_cjson.c
           cd "$WORKSPACE_ROOT"
@@ -144,23 +163,24 @@ jobs:
           echo "Preparing jniLibs output directory..."
           mkdir -p android/app/src/main/jniLibs/armeabi-v7a
 
-          echo "Compiling unified native libluajit.so with libcurl (HTTPS), LuaJIT, and CJSON..."
+          echo "Compiling unified native libluajit.so with libcurl, LuaJIT, CJSON, and BitTorrent Engine..."
           $TOOLCHAIN/clang --target=armv7a-linux-androideabi21 -shared -fPIC \
-            -std=c11 -Dthread_local=_Thread_local \
+            -std=c++20 -Dthread_local=_Thread_local \
             -Icurl/dist/include \
             -ILuaJIT/src \
             -Ilua-cjson \
+            -Ibittorrent_engine/include \
             android/app/src/main/cpp/bridge.c \
             lua-cjson/strbuf.o lua-cjson/fpconv.o lua-cjson/lua_cjson.o \
+            bittorrent_engine/build/lib/libtori.a \
             curl/dist/lib/libcurl.a \
             mbedtls_dist/lib/libmbedtls.a \
             mbedtls_dist/lib/libmbedcrypto.a \
             mbedtls_dist/lib/libmbedx509.a \
             LuaJIT/src/libluajit.a \
             -o android/app/src/main/jniLibs/armeabi-v7a/libluajit.so \
-            -llog -lz -lm -latomic
+            -llog -lz -lm -latomic -lc++
 
-          # Verification check
           ls -lh android/app/src/main/jniLibs/armeabi-v7a/libluajit.so
 
       - name: Install Dependencies
@@ -204,7 +224,7 @@ jobs:
         run: |
           TAG_NAME="v1.0.0-${{ github.run_number }}"
           RELEASE_TITLE="Media Client TV v1.0.0-${{ github.run_number }}"
-          RELEASE_NOTES="Automated signed release build for Android TV (Chromecast HD optimized 32-bit armeabi-v7a with LuaJIT, libcurl HTTPS via mbedTLS, and built-in cjson)."
+          RELEASE_NOTES="Automated signed release build for Android TV (Chromecast HD optimized 32-bit armeabi-v7a with LuaJIT, libcurl HTTPS, CJSON, and integrated native BitTorrent engine)."
           
           APK_PATH=$(find build/app/outputs/flutter-apk/ -name "app-release.apk" -o -name "*.apk" | head -n 1)
           
