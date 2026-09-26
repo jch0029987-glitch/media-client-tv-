@@ -41,14 +41,14 @@ class AirPlaySystem extends ChangeNotifier {
       for (final type in serviceTypes) {
         try {
           await for (final PtrResourceRecord ptr in mdns.lookup<PtrResourceRecord>(
-            ResourceRecordQuery.ptr(type),
+            ResourceRecordQuery.serverPointer(type),
           )) {
             await for (final SrvResourceRecord srv in mdns.lookup<SrvResourceRecord>(
               ResourceRecordQuery.service(ptr.domainName),
             )) {
-              // Lookup corresponding IP address using modern address API
+              // Lookup corresponding IPv4 address using ResourceRecordQuery.addressIPv4
               await for (final IPAddressResourceRecord ip in mdns.lookup<IPAddressResourceRecord>(
-                ResourceRecordQuery.address(srv.target),
+                ResourceRecordQuery.addressIPv4(srv.target),
               )) {
                 final deviceName = ptr.domainName.replaceAll('.' + type, '');
                 final ipAddress = ip.address.address;
