@@ -136,17 +136,22 @@ class _TorrentHubScreenState extends State<TorrentHubScreen> {
   final TextEditingController _magnetController = TextEditingController();
   Map<String, dynamic> _stats = {};
   Timer? _pollTimer;
+  Timer? _clipboardPollTimer;
   bool _isStreaming = false;
+  String _latestWebClipboard = '';
+  final String _clipboardEndpoint = 'http://127.0.0.1:9090/api/clipboard';
 
   @override
   void initState() {
     super.initState();
     _pollTimer = Timer.periodic(const Duration(seconds: 2), (_) => _pollStats());
+    _clipboardPollTimer = Timer.periodic(const Duration(seconds: 3), (_) => _pollWebClipboard());
   }
 
   @override
   void dispose() {
     _pollTimer?.cancel();
+    _clipboardPollTimer?.cancel();
     _magnetController.dispose();
     super.dispose();
   }
@@ -158,6 +163,37 @@ class _TorrentHubScreenState extends State<TorrentHubScreen> {
         _stats = stats;
         _isStreaming = stats['status'] == 'streaming' || stats['active'] == true;
       });
+    }
+  }
+
+  Future<void> _pollWebClipboard() async {
+    try {
+      final response = await http.get(Uri.parse(_clipboardEndpoint)).timeout(const Duration(seconds: 2));
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        final remoteText = data['clipboard'] ?? data['text'] ?? '';
+        if (remoteText.isNotEmpty && remoteText != _latestWebClipboard) {
+          setState(() {
+            _latestWebClipboard = remoteText;
+            _magnetController.text = remoteText;
+          });
+          await Clipboard.setData(ClipboardData(text: remoteText));
+          MeshLogProvider().addLog("Synced web endpoint clipboard: $remoteText");
+          ToastHelper.showToast('Synced clipboard from web endpoint!');
+        }
+      }
+    } catch (_) {
+      // Ignore network timeouts during background polling
+    }
+  }
+
+  Future<void> _pasteFromClipboard() async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    if (data != null && data.text != null) {
+      _magnetController.text = data.text!;
+      ToastHelper.showToast('Pasted from clipboard!');
+    } else {
+      ToastHelper.showToast('Clipboard is empty');
     }
   }
 
@@ -174,7 +210,6 @@ class _TorrentHubScreenState extends State<TorrentHubScreen> {
 
     MeshLogProvider().addLog("Starting native torrent stream from UI...");
     
-    // Await the Future<String?> returned by the engine
     final resultStr = await NativeTorrentEngine().startTorrentStream(magnet, saveDir, port: 8080);
     
     try {
@@ -228,7 +263,18 @@ class _TorrentHubScreenState extends State<TorrentHubScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Magnet Link Input', style: TextStyle(color: skin.primaryColor, fontWeight: FontWeight.bold, fontSize: 16)),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text('Magnet Link Input', style: TextStyle(color: skin.primaryColor, fontWeight: FontWeight.bold, fontSize: 16)),
+                          OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(side: BorderSide(color: skin.primaryColor)),
+                            icon: Icon(Icons.paste, size: 16, color: skin.primaryColor),
+                            label: const Text('Paste Clipboard'),
+                            onPressed: _pasteFromClipboard,
+                          ),
+                        ],
+                      ),
                       const SizedBox(height: 12),
                       TextField(
                         controller: _magnetController,
@@ -239,6 +285,15 @@ class _TorrentHubScreenState extends State<TorrentHubScreen> {
                           enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: skin.primaryColor)),
                         ),
                       ),
+                      if (_latestWebClipboard.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          'Web Endpoint Sync: $_latestWebClipboard',
+                          style: TextStyle(color: skin.textSecondaryColor, fontSize: 11, fontStyle: FontStyle.italic),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
                       const SizedBox(height: 20),
                       Row(
                         children: [
