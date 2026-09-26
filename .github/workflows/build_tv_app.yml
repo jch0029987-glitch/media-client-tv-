@@ -53,6 +53,7 @@ jobs:
           
           TOOLCHAIN="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin"
           export PATH="$TOOLCHAIN:$PATH"
+          export ANDROID_NDK_HOME="$NDK_PATH"
 
           WORKSPACE_ROOT="$PWD"
           OPENSSL_PREFIX="$WORKSPACE_ROOT/openssl_dist"
@@ -60,11 +61,8 @@ jobs:
           echo "Compiling OpenSSL statically for Android..."
           cd openssl
           
-          # Explicitly provide CC=clang to prevent OpenSSL 3 from searching for legacy arm-linux-androideabi-gcc
-          CC=clang \
-          AR=llvm-ar \
-          RANLIB=llvm-ranlib \
-          ./Configure android-arm \
+          # OpenSSL 3 requires ANDROID_NDK_HOME and clang available on PATH
+          CC=clang ./Configure android-arm \
                     -D__ANDROID_API__=21 \
                     --prefix="$OPENSSL_PREFIX" \
                     no-shared \
