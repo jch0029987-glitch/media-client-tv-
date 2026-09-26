@@ -22,6 +22,18 @@ class SkinConfig {
   String navigationLayout = "rail";
   bool enableDynamicFanart = true;
 
+  Map<String, dynamic> toJson() => {
+        'skinName': skinName,
+        'gridColumns': gridColumns,
+        'cardCornerRadius': cardCornerRadius,
+        'borderWidth': borderWidth,
+        'contentPadding': contentPadding,
+        'headerFontSize': headerFontSize,
+        'showNavigationLabels': showNavigationLabels,
+        'navigationLayout': navigationLayout,
+        'enableDynamicFanart': enableDynamicFanart,
+      };
+
   static SkinConfig parseXml(String xmlString) {
     final skin = SkinConfig();
     try {
@@ -114,5 +126,15 @@ class SkinManager extends ChangeNotifier {
     } catch (e) {
       MeshLogProvider().addLog("Failed to persist skin XML: $e");
     }
+  }
+
+  Future<void> updateSkinConfig(Map<String, dynamic> data) async {
+    if (data.containsKey('skinName')) {
+      _currentSkin.skinName = data['skinName'];
+    }
+    if (data.containsKey('gridColumns')) {
+      _currentSkin.gridColumns = data['gridColumns'];
+    }
+    notifyListeners();
   }
 }
