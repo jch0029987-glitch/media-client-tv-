@@ -186,8 +186,8 @@ jobs:
           mkdir -p android/app/src/main/jniLibs/armeabi-v7a
 
           echo "Compiling unified native libluajit.so with libcurl, LuaJIT, CJSON, and BitTorrent Engine..."
-          $TOOLCHAIN/clang --target=armv7a-linux-androideabi21 -shared -fPIC \
-            -std=c++20 -Dthread_local=_Thread_local \
+          $TOOLCHAIN/clang++ --target=armv7a-linux-androideabi21 -shared -fPIC \
+            -std=c++20 -x c++ -Dthread_local=_Thread_local \
             -Icurl/dist/include \
             -Iopenssl_dist/include \
             -ILuaJIT/src \
