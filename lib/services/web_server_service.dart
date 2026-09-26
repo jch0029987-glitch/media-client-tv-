@@ -18,17 +18,18 @@ class WebServerService {
 
   bool get isRunning => _isRunning;
 
-  /// Starts the local HTTP management server, sets up mDNS, and provisions assets/storage paths
-  Future<void> startServer({int port = 8080}) async {
+  /// Starts the local HTTP management server on all interfaces at port 9090
+  Future<void> startServer({int port = 9090}) async {
     if (_isRunning) return;
 
     try {
       await _initWebRootAssets();
       await _initStorageFolder();
 
+      // Bind to anyIPv4 to listen across all network interfaces
       _server = await HttpServer.bind(InternetAddress.anyIPv4, port);
       _isRunning = true;
-      logMessage('Web server started successfully on port $port');
+      logMessage('Web server started successfully on all interfaces at port $port');
 
       _registerMDNSService(port);
 
@@ -150,7 +151,6 @@ class WebServerService {
         ..close();
     } else if (path == '/api/file/save' && request.method == 'POST') {
       try {
-        // Read file contents or name headers and save directly to local storage folder
         final fileName = request.headers.value('x-file-name') ?? 'uploaded_${DateTime.now().millisecondsSinceEpoch}.dat';
         final file = File('$_storageFolderPath/$fileName');
         
@@ -219,7 +219,6 @@ class WebServerService {
           ..close();
       }
     } else {
-      // Serve static assets out of the local web root directory
       var filePath = path == '/' ? '/index.html' : path;
       final file = File('$_webRootPath$filePath');
 
@@ -245,7 +244,6 @@ class WebServerService {
     }
   }
 
-  /// Helper to collect request stream into a byte list for file saving
   Future<List<int>> consolidatingBytes(HttpRequest request) async {
     final List<int> bytes = [];
     await for (var chunk in request) {
