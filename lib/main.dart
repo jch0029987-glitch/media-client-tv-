@@ -27,8 +27,28 @@ class ToastHelper {
     try {
       await _platform.invokeMethod('showToast', {'message': message});
     } catch (e) {
-      print("Failed to show toast: $e");
+      MeshLogProvider().addLog("Failed to show toast: $e");
     }
+  }
+}
+
+/// Global Real-Time Log Buffer Provider for Web Dashboard Broadcasting
+class MeshLogProvider extends ChangeNotifier {
+  static final MeshLogProvider _instance = MeshLogProvider._internal();
+  factory MeshLogProvider() => _instance;
+  MeshLogProvider._internal();
+
+  final List<String> _logs = [];
+  List<String> get logs => List.unmodifiable(_logs);
+
+  void addLog(String message) {
+    final timestamp = DateTime.now().toIso8601String().split('T').last.substring(0, 8);
+    final entry = "[$timestamp] $message";
+    _logs.insert(0, entry); // newest first
+    if (_logs.length > 200) {
+      _logs.removeLast();
+    }
+    notifyListeners();
   }
 }
 
@@ -55,8 +75,9 @@ class LuaJitEngine {
           .asFunction();
 
       _initialized = true;
+      MeshLogProvider().addLog("LuaJIT Engine initialized successfully.");
     } catch (e) {
-      print("Failed to load LuaJIT native library or symbols: $e");
+      MeshLogProvider().addLog("Failed to load LuaJIT native library: $e");
     }
   }
 
@@ -158,7 +179,7 @@ class SkinConfig {
         }
       }
     } catch (e) {
-      print("Failed to parse full Kodi XML skin document: $e");
+      MeshLogProvider().addLog("Failed to parse full Kodi XML skin document: $e");
     }
     return skin;
   }
@@ -192,7 +213,7 @@ class SkinManager extends ChangeNotifier {
         notifyListeners();
       }
     } catch (e) {
-      print("Failed to load saved skin: $e");
+      MeshLogProvider().addLog("Failed to load saved skin: $e");
     }
   }
 
@@ -205,7 +226,7 @@ class SkinManager extends ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('mesh_active_skin_xml', xmlString);
     } catch (e) {
-      print("Failed to persist skin XML: $e");
+      MeshLogProvider().addLog("Failed to persist skin XML: $e");
     }
   }
 }
@@ -228,7 +249,7 @@ class SettingsManager extends ChangeNotifier {
         notifyListeners();
       }
     } catch (e) {
-      print("Failed to load saved settings: $e");
+      MeshLogProvider().addLog("Failed to load saved settings: $e");
     }
   }
 
@@ -240,7 +261,7 @@ class SettingsManager extends ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('mesh_custom_settings', json.encode(newSettings));
     } catch (e) {
-      print("Failed to persist settings: $e");
+      MeshLogProvider().addLog("Failed to persist settings: $e");
     }
   }
 }
@@ -274,7 +295,6 @@ class LibraryPluginProvider extends ChangeNotifier {
       _dynamicCatalogItems.addAll(parsedOutput);
     } else if (parsedOutput is Map) {
       if (parsedOutput['rows'] != null && parsedOutput['rows'] is List) {
-        // Sort rows by priority if provided
         final rowsList = List<dynamic>.from(parsedOutput['rows']);
         rowsList.sort((a, b) => (a['priority'] ?? 0).compareTo(b['priority'] ?? 0));
         _dynamicRows.addAll(rowsList);
@@ -306,14 +326,14 @@ class MeshBackgroundService {
       _luaEngine.initialize();
       _server = await HttpServer.bind(InternetAddress.anyIPv4, _port);
       _isRunning = true;
-      print("Background Mesh Server started successfully on port $_port");
+      MeshLogProvider().addLog("Background Mesh Server started successfully on port $_port");
 
       _server!.listen(_handleMeshRequest, onError: (e) {
-        print("Mesh server stream error: $e");
+        MeshLogProvider().addLog("Mesh server stream error: $e");
       });
     } catch (e) {
       _isRunning = false;
-      print("Failed to start background mesh server: $e");
+      MeshLogProvider().addLog("Failed to start background mesh server: $e");
     }
   }
 
@@ -326,6 +346,10 @@ class MeshBackgroundService {
         response.headers.contentType = ContentType.html;
         response.statusCode = HttpStatus.ok;
         response.write(htmlContent);
+      } else if (request.method == 'GET' && request.uri.path == '/api/system/logs') {
+        response.headers.contentType = ContentType.json;
+        response.statusCode = HttpStatus.ok;
+        response.write(json.encode({'logs': MeshLogProvider().logs}));
       } else if (request.method == 'POST' && request.uri.path == '/api/plugins/save') {
         response.headers.contentType = ContentType.json;
         final content = await utf8.decoder.bind(request).join();
@@ -342,21 +366,38 @@ class MeshBackgroundService {
         await file.writeAsString(luaCode);
 
         LibraryPluginProvider().registerLoadedPlugin(filename, luaCode);
+        MeshLogProvider().addLog("Saved and registered Lua plugin: $filename");
 
         try {
-          // If plugin defines a get_plugin_manifest() or returns a JSON table structure
           final executionResult = _luaEngine.eval(luaCode);
           if (executionResult.isNotEmpty && !executionResult.startsWith('Error')) {
             final parsedOutput = json.decode(executionResult);
             LibraryPluginProvider().injectPluginPayload(parsedOutput);
           }
         } catch (e) {
-          print("Lua execution evaluation notice: $e");
+          MeshLogProvider().addLog("Lua execution evaluation notice: $e");
         }
 
         await ToastHelper.showToast('Lua Plugin $filename Deployed Globally!');
         response.statusCode = HttpStatus.ok;
         response.write(json.encode({'status': 'success', 'path': file.path}));
+      } else if (request.method == 'POST' && request.uri.path == '/api/plugins/test') {
+        response.headers.contentType = ContentType.json;
+        final content = await utf8.decoder.bind(request).join();
+        final data = json.decode(content);
+        final String code = data['code'] ?? '';
+
+        String evalResult;
+        try {
+          evalResult = _luaEngine.eval(code);
+          MeshLogProvider().addLog("Lua sandbox test executed successfully.");
+        } catch (e) {
+          evalResult = 'Error: ${e.toString()}';
+          MeshLogProvider().addLog("Lua sandbox test error: $e");
+        }
+
+        response.statusCode = HttpStatus.ok;
+        response.write(json.encode({'status': 'success', 'output': evalResult}));
       } else if (request.method == 'POST' && request.uri.path == '/api/skin/save') {
         response.headers.contentType = ContentType.json;
         final content = await utf8.decoder.bind(request).join();
@@ -373,6 +414,7 @@ class MeshBackgroundService {
         await file.writeAsString(xmlCode);
 
         await SkinManager().applySkinXml(xmlCode);
+        MeshLogProvider().addLog("Applied and saved Kodi skin: $filename");
         await ToastHelper.showToast('Kodi Skin $filename Applied & Saved!');
 
         response.statusCode = HttpStatus.ok;
@@ -383,6 +425,7 @@ class MeshBackgroundService {
         final data = json.decode(content);
         
         await SettingsManager().updateSettings(data);
+        MeshLogProvider().addLog("Updated app settings from web mesh UI.");
         await ToastHelper.showToast('Settings Updated via Mesh Web UI!');
 
         response.statusCode = HttpStatus.ok;
@@ -394,14 +437,25 @@ class MeshBackgroundService {
         final String message = data['message'] ?? 'Notification';
         
         await ToastHelper.showToast(message);
+        MeshLogProvider().addLog("Broadcasted toast: $message");
         response.statusCode = HttpStatus.ok;
         response.write(json.encode({'status': 'success'}));
+      } else if (request.method == 'POST' && request.uri.path == '/api/system/remote') {
+        response.headers.contentType = ContentType.json;
+        final content = await utf8.decoder.bind(request).join();
+        final data = json.decode(content);
+        final String action = data['action'] ?? '';
+
+        MeshLogProvider().addLog("Remote action received from mesh: $action");
+        response.statusCode = HttpStatus.ok;
+        response.write(json.encode({'status': 'success', 'action': action}));
       } else {
         response.headers.contentType = ContentType.json;
         response.statusCode = HttpStatus.notFound;
         response.write(json.encode({"error": "Endpoint not found"}));
       }
     } catch (e) {
+      MeshLogProvider().addLog("Mesh request error: $e");
       response.headers.contentType = ContentType.json;
       response.statusCode = HttpStatus.internalServerError;
       response.write(json.encode({"error": e.toString()}));
@@ -413,6 +467,8 @@ class MeshBackgroundService {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  MeshLogProvider().addLog("App initialization started.");
+  
   await SkinManager().loadSavedSkin();
   await SettingsManager().loadSavedSettings();
   
@@ -423,6 +479,7 @@ void main() async {
   AirPlaySystem().initializeNativeDaemon();
   await AirPlaySystem().startNativeServer(7000);
 
+  MeshLogProvider().addLog("App fully booted up on Android 14 TV.");
   runApp(const MediaClientApp());
 }
 
@@ -618,7 +675,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
       } else {
         setState(() => _isLoading = false);
       }
-    } catch (_) {
+    } catch (e) {
+      MeshLogProvider().addLog("Failed to fetch master addon index: $e");
       setState(() {
         _addons = [
           {'name': 'Local Lua Plugin', 'catalog_url': 'local://lua_plugin'}
@@ -659,7 +717,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
           _isLoading = false;
         });
       }
-    } catch (_) {
+    } catch (e) {
+      MeshLogProvider().addLog("Failed to fetch catalog from $catalogUrl: $e");
       if (_activeCatalogUrl == catalogUrl) setState(() => _isLoading = false);
     }
   }
