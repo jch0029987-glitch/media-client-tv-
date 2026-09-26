@@ -168,6 +168,26 @@ class LuaJitEngine {
     }
   }
 
+  String executeAction(String scriptContent, String action, String query) {
+    if (!_initialized) initialize();
+    if (!_initialized) return '{"status": "error", "message": "Lua engine not initialized"}';
+
+    // Inject action and query globals before executing the script chunk
+    final wrappedScript = '''
+      action = "$action"
+      query = "$query"
+      $scriptContent
+    ''';
+
+    final scriptPtr = wrappedScript.toNativeUtf8();
+    try {
+      final resultPtr = _evalScript(scriptPtr);
+      return resultPtr.toDartString();
+    } finally {
+      calloc.free(scriptPtr);
+    }
+  }
+
   String search(String scriptContent, String queryTerm) {
     if (!_initialized) initialize();
     
@@ -784,6 +804,80 @@ class _LibraryScreenState extends State<LibraryScreen> {
     }
   }
 
+  Future<void> _handleItemTap(Map<String, dynamic> item) async {
+    final String action = item['action'] ?? 'none';
+    final String itemId = item['id'] ?? '';
+    final String itemType = item['type'] ?? 'video';
+    final String itemTitle = item['title'] ?? 'Media Item';
+
+    if (itemType == 'directory' || action == 'trending' || action == 'popular') {
+      setState(() => _isLoading = true);
+      
+      final luaCode = _pluginProvider.loadedPlugins.isNotEmpty
+          ? _pluginProvider.loadedPlugins.last['code'] ?? ''
+          : '';
+
+      if (luaCode.isNotEmpty) {
+        final engine = LuaJitEngine();
+        final resultJson = engine.executeAction(luaCode, action, itemId);
+        
+        try {
+          final data = json.decode(resultJson);
+          setState(() {
+            _currentCatalogItems = data['items'] ?? [];
+            _isLoading = false;
+          });
+        } catch (e) {
+          MeshLogProvider().addLog("Failed to parse directory action result: $e");
+          setState(() => _isLoading = false);
+        }
+      } else {
+        setState(() => _isLoading = false);
+      }
+    } else {
+      final url = item['stream_url'] ?? item['url'] ?? '';
+      if (url.isNotEmpty) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => PlayerScreen(streamUrl: url, title: itemTitle),
+          ),
+        );
+      } else if (action == 'resolve_stream' || itemId.isNotEmpty) {
+        setState(() => _isLoading = true);
+        
+        final luaCode = _pluginProvider.loadedPlugins.isNotEmpty
+            ? _pluginProvider.loadedPlugins.last['code'] ?? ''
+            : '';
+
+        if (luaCode.isNotEmpty) {
+          final engine = LuaJitEngine();
+          final resultJson = engine.executeAction(luaCode, 'resolve_stream', itemId);
+          
+          try {
+            final data = json.decode(resultJson);
+            final streamUrl = data['stream_url'] ?? '';
+            setState(() => _isLoading = false);
+
+            if (streamUrl.isNotEmpty) {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => PlayerScreen(streamUrl: streamUrl, title: itemTitle),
+                ),
+              );
+            } else {
+              MeshLogProvider().addLog("Resolved stream URL was empty for item ID: $itemId");
+            }
+          } catch (e) {
+            MeshLogProvider().addLog("Failed to resolve stream JSON: $e");
+            setState(() => _isLoading = false);
+          }
+        }
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
@@ -878,18 +972,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                                                       : [],
                                                 ),
                                                 child: InkWell(
-                                                  onTap: () {
-                                                    final url = item['stream_url'] ?? item['url'] ?? '';
-                                                    final title = item['title'] ?? 'Media Item';
-                                                    if (url.isNotEmpty) {
-                                                      Navigator.push(
-                                                        context,
-                                                        MaterialPageRoute(
-                                                          builder: (context) => PlayerScreen(streamUrl: url, title: title),
-                                                        ),
-                                                      );
-                                                    }
-                                                  },
+                                                  onTap: () => _handleItemTap(item),
                                                   borderRadius: BorderRadius.circular(skin.cardCornerRadius),
                                                   child: Center(
                                                     child: Padding(
@@ -952,18 +1035,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                                                 : [],
                                           ),
                                           child: InkWell(
-                                            onTap: () {
-                                              final url = item['url'] ?? '';
-                                              final title = item['title'] ?? item['name'] ?? 'Media Item';
-                                              if (url.isNotEmpty) {
-                                                Navigator.push(
-                                                  context,
-                                                  MaterialPageRoute(
-                                                    builder: (context) => PlayerScreen(streamUrl: url, title: title),
-                                                  ),
-                                                );
-                                              }
-                                            },
+                                            onTap: () => _handleItemTap(item),
                                             borderRadius: BorderRadius.circular(skin.cardCornerRadius),
                                             child: Center(
                                               child: Padding(
