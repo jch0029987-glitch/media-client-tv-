@@ -182,9 +182,10 @@ jobs:
           $TARGET_CC -fPIC -O3 -c strbuf.c fpconv.c lua_cjson.c -I../LuaJIT/src
           cd "$WORKSPACE_ROOT"
 
-          echo "Compiling bridge.c as pure C..."
+          echo "Compiling bridge.c as pure C with thread_local mapping..."
           $TARGET_CC -fPIC -O3 -c android/app/src/main/cpp/bridge.c \
             -o android/app/src/main/cpp/bridge.o \
+            -Dthread_local=_Thread_local \
             -Icurl/dist/include \
             -Iopenssl_dist/include \
             -ILuaJIT/src \
