@@ -152,7 +152,6 @@ class _TorrentHubScreenState extends State<TorrentHubScreen> {
   }
 
   void _pollStats() {
-    // Assuming NativeTorrentEngine().getStats() returns a Map in your implementation
     final stats = NativeTorrentEngine().getStats(); 
     if (mounted) {
       setState(() {
@@ -165,7 +164,7 @@ class _TorrentHubScreenState extends State<TorrentHubScreen> {
   Future<void> _startStream() async {
     final magnet = _magnetController.text.trim();
     if (magnet.isEmpty) {
-      await ToastHelper.showToast('Please enter a valid magnet link');
+      ToastHelper.showToast('Please enter a valid magnet link');
       return;
     }
 
@@ -174,24 +173,23 @@ class _TorrentHubScreenState extends State<TorrentHubScreen> {
     await Directory(saveDir).create(recursive: true);
 
     MeshLogProvider().addLog("Starting native torrent stream from UI...");
-    final resultStr = NativeTorrentEngine().startTorrentStream(magnet, saveDir, port: 8080);
+    
+    // Await the Future<String?> returned by the engine
+    final resultStr = await NativeTorrentEngine().startTorrentStream(magnet, saveDir, port: 8080);
+    
     try {
-      final res = json.decode(resultStr);
-      if (res['status'] == 'success' || res['stream_url'] != null) {
-        await ToastHelper.showToast('Torrent streaming initialized!');
-        final streamUrl = res['stream_url'] ?? 'http://127.0.0.1:8080/stream';
-        
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => PlayerScreen(streamUrl: streamUrl, title: 'Torrent Stream'),
-          ),
-        );
-      } else {
-        await ToastHelper.showToast('Failed to start torrent stream');
-      }
+      final streamUrl = resultStr ?? 'http://127.0.0.1:8080/stream';
+      ToastHelper.showToast('Torrent streaming initialized!');
+      
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => PlayerScreen(streamUrl: streamUrl, title: 'Torrent Stream'),
+        ),
+      );
     } catch (e) {
       MeshLogProvider().addLog("Torrent start error: $e");
+      ToastHelper.showToast('Failed to start torrent stream');
     }
   }
 
@@ -507,7 +505,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     final String itemTitle = item['title'] ?? 'Media Item';
 
     MeshLogProvider().addLog("Action Triggered: [$action] on item: $itemTitle (ID: $itemId)");
-    await ToastHelper.showToast('Executing: $itemTitle');
+    ToastHelper.showToast('Executing: $itemTitle');
 
     if (itemType == 'directory' || action == 'trending' || action == 'popular') {
       setState(() => _isLoading = true);
@@ -530,7 +528,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
           MeshLogProvider().addLog("Successfully loaded directory action: $action");
         } catch (e) {
           MeshLogProvider().addLog("Failed to parse directory action result: $e");
-          await ToastHelper.showToast('Error loading directory');
+          ToastHelper.showToast('Error loading directory');
           setState(() => _isLoading = false);
         }
       } else {
@@ -573,11 +571,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
               );
             } else {
               MeshLogProvider().addLog("Resolved stream URL was empty for item ID: $itemId");
-              await ToastHelper.showToast('Stream resolution failed');
+              ToastHelper.showToast('Stream resolution failed');
             }
           } catch (e) {
             MeshLogProvider().addLog("Failed to resolve stream JSON: $e");
-            await ToastHelper.showToast('Stream resolution error');
+            ToastHelper.showToast('Stream resolution error');
             setState(() => _isLoading = false);
           }
         }
@@ -978,7 +976,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 final newPath = controller.text.trim();
                 if (newPath.isNotEmpty) {
                   await StorageManager().linkFolder(newPath);
-                  await ToastHelper.showToast('Storage Folder Updated!');
+                  ToastHelper.showToast('Storage Folder Updated!');
                 }
                 Navigator.pop(context);
                 setState(() {});
