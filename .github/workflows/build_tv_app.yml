@@ -1,4 +1,4 @@
-name: Build TV App APK
+Name: Build TV App APK
 
 on:
   workflow_dispatch:
@@ -59,12 +59,18 @@ jobs:
 
           echo "Compiling OpenSSL statically for Android..."
           cd openssl
+          
+          # Explicitly provide CC=clang to prevent OpenSSL 3 from searching for legacy arm-linux-androideabi-gcc
+          CC=clang \
+          AR=llvm-ar \
+          RANLIB=llvm-ranlib \
           ./Configure android-arm \
                     -D__ANDROID_API__=21 \
                     --prefix="$OPENSSL_PREFIX" \
                     no-shared \
                     no-tests \
                     no-engine
+                    
           make -j$(nproc)
           make install
           
@@ -168,7 +174,6 @@ jobs:
           $TOOLCHAIN/clang --target=armv7a-linux-androideabi21 -shared -fPIC \
             -std=c++20 -Dthread_local=_Thread_local \
             -Icurl/dist/include \
-            -IOpenSSL/include \
             -Iopenssl_dist/include \
             -ILuaJIT/src \
             -Ilua-cjson \
