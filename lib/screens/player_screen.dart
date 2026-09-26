@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
@@ -5,6 +6,7 @@ import 'package:video_player/video_player.dart';
 import '../services/mesh_log_provider.dart';
 import '../services/skin_manager.dart';
 import '../services/toast_helper.dart';
+import '../services/native_torrent_engine.dart';
 
 class PlayerScreen extends StatefulWidget {
   final String streamUrl;
@@ -26,11 +28,28 @@ class _PlayerScreenState extends State<PlayerScreen> {
   bool _showControls = true;
   bool _hasError = false;
   String _errorMessage = '';
+
+  // Stats for Nerds HUD state
+  bool _showTelemetryHud = false;
+  Map<String, dynamic> _torrentStats = {};
+  Timer? _hudPollTimer;
   
   @override
   void initState() {
     super.initState();
     _initializePlayer();
+
+    // Poll torrent telemetry when HUD is active
+    _hudPollTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (_showTelemetryHud) {
+        final stats = NativeTorrentEngine().getStats();
+        if (mounted) {
+          setState(() {
+            _torrentStats = stats;
+          });
+        }
+      }
+    });
   }
 
   Future<void> _initializePlayer() async {
@@ -72,6 +91,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   @override
   void dispose() {
+    _hudPollTimer?.cancel();
     _controller.dispose();
     super.dispose();
   }
@@ -92,6 +112,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _controller.seekTo(targetPosition);
   }
 
+  void _toggleHud() {
+    setState(() {
+      _showTelemetryHud = !_showTelemetryHud;
+      if (_showTelemetryHud) {
+        _torrentStats = NativeTorrentEngine().getStats();
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
@@ -105,7 +134,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
             autofocus: true,
             onKeyEvent: (node, event) {
               if (event is KeyDownEvent) {
-                if (event.logicalKey == LogicalKeyboardKey.select ||
+                if (event.logicalKey == LogicalKeyboardKey.keyN ||
+                    event.logicalKey == LogicalKeyboardKey.info) {
+                  _toggleHud();
+                  return KeyEventResult.handled;
+                } else if (event.logicalKey == LogicalKeyboardKey.select ||
                     event.logicalKey == LogicalKeyboardKey.space ||
                     event.logicalKey == LogicalKeyboardKey.mediaPlayPause) {
                   _togglePlayPause();
@@ -185,15 +218,29 @@ class _PlayerScreenState extends State<PlayerScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                IconButton(
-                                  icon: const Icon(Icons.arrow_back, color: Colors.white),
-                                  onPressed: () => Navigator.pop(context),
+                                Row(
+                                  children: [
+                                    IconButton(
+                                      icon: const Icon(Icons.arrow_back, color: Colors.white),
+                                      onPressed: () => Navigator.pop(context),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Text(
+                                      widget.title,
+                                      style: TextStyle(color: skin.textPrimaryColor, fontSize: 22, fontWeight: FontWeight.bold),
+                                    ),
+                                  ],
                                 ),
-                                const SizedBox(width: 12),
-                                Text(
-                                  widget.title,
-                                  style: TextStyle(color: skin.textPrimaryColor, fontSize: 22, fontWeight: FontWeight.bold),
+                                OutlinedButton.icon(
+                                  style: OutlinedButton.styleFrom(
+                                    side: BorderSide(color: skin.primaryColor),
+                                    foregroundColor: Colors.white,
+                                  ),
+                                  icon: Icon(Icons.analytics, color: skin.primaryColor),
+                                  label: Text(_showTelemetryHud ? 'Hide Stats' : 'Stats for Nerds (N)'),
+                                  onPressed: _toggleHud,
                                 ),
                               ],
                             ),
@@ -247,11 +294,94 @@ class _PlayerScreenState extends State<PlayerScreen> {
                       ),
                     ),
                   ),
+
+                // Stats for Nerds HUD Overlay Layer
+                if (_showTelemetryHud)
+                  Positioned(
+                    top: 90,
+                    left: 32,
+                    child: Container(
+                      width: 380,
+                      padding: const EdgeInsets.all(16.0),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.85),
+                        borderRadius: BorderRadius.circular(8.0),
+                        border: Border.all(color: Colors.greenAccent.withOpacity(0.6), width: 1.5),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.5),
+                            blurRadius: 10,
+                            spreadRadius: 2,
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text(
+                                'STATS FOR NERDS',
+                                style: TextStyle(
+                                  color: Colors.greenAccent,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14,
+                                  letterSpacing: 1.2,
+                                ),
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.close, color: Colors.white70, size: 18),
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(),
+                                onPressed: _toggleHud,
+                              ),
+                            ],
+                          ),
+                          const Divider(color: Colors.white24, height: 16),
+                          _buildHudRow('Position / Length', '${_formatDuration(_controller.value.position)} / ${_formatDuration(_controller.value.duration)}'),
+                          _buildHudRow('Engine Status', _torrentStats['status'] ?? 'Streaming'),
+                          _buildHudRow('Download Speed', '${_torrentStats['download_speed_kbps'] ?? 0} KB/s'),
+                          _buildHudRow('Connected Peers', '${_torrentStats['peers'] ?? 0} active'),
+                          _buildHudRow('Buffer Progress', '${(_torrentStats['progress'] ?? 0.0).toStringAsFixed(1)}%'),
+                          _buildHudRow('Stream Endpoint', _torrentStats['endpoint'] ?? 'http://127.0.0.1:8080/stream', isMonospace: true),
+                        ],
+                      ),
+                    ),
+                  ),
               ],
             ),
           ),
         );
       },
+    );
+  }
+
+  Widget _buildHudRow(String label, String value, {bool isMonospace = false}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(color: Colors.white70, fontSize: 12),
+          ),
+          Flexible(
+            child: Text(
+              value,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                fontFamily: isMonospace ? 'monospace' : null,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
