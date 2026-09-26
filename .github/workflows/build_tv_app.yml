@@ -1,4 +1,4 @@
-Name: Build TV App APK
+name: Build TV App APK
 
 on:
   workflow_dispatch:
