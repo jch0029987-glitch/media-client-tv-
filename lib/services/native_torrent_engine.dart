@@ -104,11 +104,20 @@ class NativeTorrentEngine {
   }
 
   /// Starts direct streaming with sequential downloading and minimal buffering footprint
-  Future<String?> startTorrentStream(String magnetUri, String saveDir, {int port = 8080}) async {
+  Future<String?> startTorrentStream(String magnetUri, String saveDir, {int port = 8080, String? targetFileName}) async {
     if (!_isInitialized) await initialize();
     MeshLogProvider().addLog('Starting low-storage torrent stream on port $port');
     
     try {
+      // Define expected target path for C-side file streaming matching bridge.c
+      final resolvedFileName = targetFileName ?? 'downloaded_media.mp4';
+      final fullFilePath = '$saveDir/$resolvedFileName';
+
+      // Inform native C layer of the exact active stream file path
+      await _channel.invokeMethod('setStreamFilePath', {
+        'filePath': fullFilePath,
+      });
+
       final result = await _channel.invokeMethod('startTorrentStream', {
         'magnet': magnetUri,
         'saveDir': saveDir,
