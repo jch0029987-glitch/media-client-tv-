@@ -33,6 +33,9 @@ extern "C" {
 }
 #endif
 
+// Global dynamic target file path buffer for ExoPlayer HTTP streaming proxy
+static char g_target_file_path[512] = "/data/local/tmp/downloaded_media.mp4";
+
 // Helper struct for libcurl memory chunk storage
 struct MemoryStruct {
     char *memory;
@@ -262,12 +265,12 @@ static void* stream_server_worker(void* arg) {
 
         write(new_socket, header_buf, header_len);
 
-        // Stream real bytes from the downloaded cache file using pread
+        // Stream real bytes from the dynamic target file path using pread
         size_t block_size = 32768;
         char *piece_buffer = malloc(block_size);
         
         if (piece_buffer) {
-            int media_fd = open("/data/local/tmp/downloaded_media.mp4", O_RDONLY);
+            int media_fd = open(g_target_file_path, O_RDONLY);
             if (media_fd >= 0) {
                 long long current_offset = range_start;
                 int total_transferred = 0;
@@ -300,6 +303,12 @@ static void* stream_server_worker(void* arg) {
 }
 
 // --- Torrents FFI Export Bindings (Low-Storage Optimized) ---
+
+EXPORT void bridge_set_stream_file_path(const char* file_path) {
+    if (file_path && strlen(file_path) > 0) {
+        snprintf(g_target_file_path, sizeof(g_target_file_path), "%s", file_path);
+    }
+}
 
 EXPORT int bridge_start_torrent(const char* magnet_uri) {
     if (!magnet_uri) return -1;
