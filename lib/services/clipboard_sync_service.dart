@@ -1,6 +1,7 @@
 import 'dart:async';
+import 'dart:convert'; // Added for jsonDecode
 import 'package:flutter/services.dart';
-import 'http/http.dart' as http; // or your local mesh server client
+import 'http/http.dart' as http;
 import 'mesh_log_provider.dart';
 
 class ClipboardSyncService {
@@ -18,12 +19,15 @@ class ClipboardSyncService {
       try {
         final response = await http.get(Uri.parse('$meshServerUrl/api/clipboard'));
         if (response.statusCode == 200) {
-          final remoteText = response.body.trim();
+          // Decode the JSON response map sent by the backend
+          final data = json.decode(response.body);
+          final remoteText = (data['clipboard'] ?? '').toString().trim();
+
           if (remoteText.isNotEmpty && remoteText != _lastSyncedText) {
             _lastSyncedText = remoteText;
             MeshLogProvider().addLog("Synced clipboard from web mesh: $remoteText");
             
-            // Optionally update system clipboard
+            // Update device system clipboard
             await Clipboard.setData(ClipboardData(text: remoteText));
             
             if (onClipboardReceived != null) {
