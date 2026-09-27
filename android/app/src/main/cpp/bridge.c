@@ -28,7 +28,6 @@ extern "C" {
     int tori_init_session_ex(const char* magnet_uri, const char* cache_dir, int max_cache_mb);
     void tori_stop_session(void);
     const char* tori_get_stats_json(void);
-    // Optional hooks for reading raw torrent data buffer ranges if supported by libtori
     int tori_read_block(long long offset, char* buffer, size_t length);
 #ifdef __cplusplus
 }
@@ -244,14 +243,14 @@ static void* stream_server_worker(void* arg) {
         char buffer[2048] = {0};
         read(new_socket, buffer, sizeof(buffer) - 1);
 
-        // Parse requested byte range if supplied by ExoPlayer
+        // Parse requested byte range supplied by ExoPlayer
         long long range_start = 0;
         char* range_header = strstr(buffer, "Range: bytes=");
         if (range_header) {
             sscanf(range_header, "Range: bytes=%lld-", &range_start);
         }
 
-        // Send valid partial content headers back to ExoPlayer to satisfy source requirements
+        // Send valid partial content headers back to ExoPlayer
         char header_buf[512];
         int header_len = snprintf(header_buf, sizeof(header_buf),
             "HTTP/1.1 206 Partial Content\r\n"
@@ -263,13 +262,27 @@ static void* stream_server_worker(void* arg) {
 
         write(new_socket, header_buf, header_len);
 
-        // Stream zero-filled padding or active torrent buffer blocks to prevent timeout
-        char chunk_buffer[32768];
-        memset(chunk_buffer, 0, sizeof(chunk_buffer));
+        // Allocate a read buffer for real torrent block chunks
+        size_t block_size = 32768;
+        char *piece_buffer = malloc(block_size);
         
-        // Feed initial chunks so ExoPlayer successfully parses track metadata
-        for (int i = 0; i < 32; i++) {
-            if (write(new_socket, chunk_buffer, sizeof(chunk_buffer)) <= 0) break;
+        if (piece_buffer) {
+            long long current_offset = range_start;
+            int total_transferred = 0;
+            int max_transfer = 1048576; // Stream 1MB per chunk request
+
+            while (total_transferred < max_transfer && g_server_running) {
+                int bytes_read = tori_read_block(current_offset, piece_buffer, block_size);
+                if (bytes_read > 0) {
+                    if (write(new_socket, piece_buffer, bytes_read) <= 0) break;
+                    current_offset += bytes_read;
+                    total_transferred += bytes_read;
+                } else {
+                    // If the peer network hasn't downloaded this piece yet, sleep briefly and retry
+                    usleep(50000); // 50ms pause
+                }
+            }
+            free(piece_buffer);
         }
 
         close(new_socket);
