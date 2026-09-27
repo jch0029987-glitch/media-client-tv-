@@ -165,7 +165,7 @@ jobs:
           TOOLCHAIN="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin"
           TARGET_CC="$TOOLCHAIN/clang --target=armv7a-linux-androideabi21"
 
-          echo "Compiling LuaJIT..."
+          echo "Compiling LuaJIT for Android target..."
           cd LuaJIT
           make clean
           make HOST_CC="gcc -m32" \
@@ -174,7 +174,7 @@ jobs:
                TARGET_LD="$TARGET_CC" \
                TARGET_AR="$TOOLCHAIN/llvm-ar rcus" \
                TARGET_STRIP="$TOOLCHAIN/llvm-strip" \
-               TARGET_SYS=Linux
+               TARGET_SYS=Android
           cd "$WORKSPACE_ROOT"
 
           echo "Compiling Lua-CJSON object files..."
@@ -195,9 +195,10 @@ jobs:
           echo "Preparing jniLibs output directory..."
           mkdir -p android/app/src/main/jniLibs/armeabi-v7a
 
-          echo "Compiling unified native libluajit_engine.so statically with LuaJIT, libcurl, CJSON, and BitTorrent Engine..."
+          echo "Compiling unified native libluajit_engine.so statically..."
           $TOOLCHAIN/clang++ --target=armv7a-linux-androideabi21 -shared -fPIC \
             -std=c++20 -Dthread_local=_Thread_local \
+            -static-libstdc++ \
             android/app/src/main/cpp/bridge.o \
             lua-cjson/strbuf.o lua-cjson/fpconv.o lua-cjson/lua_cjson.o \
             -o android/app/src/main/jniLibs/armeabi-v7a/libluajit_engine.so \
@@ -207,8 +208,9 @@ jobs:
             curl/dist/lib/libcurl.a \
             openssl_dist/lib/libssl.a \
             openssl_dist/lib/libcrypto.a \
+            -latomic \
             -Wl,--end-group \
-            -llog -lz -lm -latomic -lc++
+            -llog -lz -lm -ldl -lpthread
 
           ls -lh android/app/src/main/jniLibs/armeabi-v7a/libluajit_engine.so
 
