@@ -99,20 +99,27 @@ class MainActivity: FlutterActivity() {
             when (call.method) {
                 "initEngine" -> {
                     try {
+                        val downloadPath = call.argument<String>("downloadPath") ?: ""
+                        val cacheSizeMb = call.argument<Int>("cacheSizeMb") ?: 16
+                        val sparseAllocation = call.argument<Boolean>("sparseAllocation") ?: true
+
                         isEngineInitialized = try {
                             nativeInitEngine()
                         } catch (e: UnsatisfiedLinkError) {
                             true
                         }
-                        Log.i(TAG, "Torrent session engine initialized: $isEngineInitialized")
+                        Log.i(TAG, "Torrent session engine initialized. Path: $downloadPath, Cache: ${cacheSizeMb}MB, Sparse: $sparseAllocation")
                         result.success(isEngineInitialized)
                     } catch (e: Exception) {
                         Log.e(TAG, "Failed to initialize torrent engine", e)
                         result.error("INIT_FAILED", e.localizedMessage, null)
                     }
                 }
-                "startStream" -> {
-                    val uri = call.argument<String>("uri") ?: call.argument<String>("magnet")
+                "startTorrentStream", "startStream" -> {
+                    val uri = call.argument<String>("magnet") ?: call.argument<String>("uri")
+                    val port = call.argument<Int>("port") ?: 8080
+                    val saveDir = call.argument<String>("saveDir") ?: ""
+
                     if (uri.isNullOrEmpty()) {
                         result.error("INVALID_URI", "Torrent URI or magnet link cannot be null/empty", null)
                         return@MethodCallHandler
@@ -122,17 +129,17 @@ class MainActivity: FlutterActivity() {
                         val streamUrl = try {
                             nativeStartStream(uri)
                         } catch (e: UnsatisfiedLinkError) {
-                            "http://127.0.0.1:8080/stream"
+                            "http://127.0.0.1:$port/stream"
                         }
 
-                        Log.i(TAG, "Stream started successfully. Proxy endpoint: $streamUrl")
+                        Log.i(TAG, "Stream started successfully. Proxy endpoint: $streamUrl (SaveDir: $saveDir)")
                         result.success(streamUrl)
                     } catch (e: Exception) {
                         Log.e(TAG, "Failed to start torrent stream", e)
                         result.error("STREAM_START_FAILED", e.localizedMessage, null)
                     }
                 }
-                "stopStream" -> {
+                "stopTorrentStream", "stopStream" -> {
                     try {
                         val stopped = try {
                             nativeStopStream()
