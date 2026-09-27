@@ -1,7 +1,7 @@
 import 'dart:io';
 import 'dart:convert';
 import 'dart:async';
-import 'package:flutter/services.dart' show rootBundle;
+import 'package:flutter/services.dart' show rootBundle, Clipboard, ClipboardData;
 import 'package:path_provider/path_provider.dart';
 
 import 'mesh_log_provider.dart';
@@ -18,6 +18,9 @@ class MeshBackgroundService {
   final List<WebSocket> _connectedClients = [];
   late String _webRootPath;
   late String _storageFolderPath;
+
+  // In-memory clipboard cache to sync between web dashboard and app runtime
+  static String _latestClipboard = '';
 
   bool get isRunning => _isRunning;
 
@@ -223,19 +226,34 @@ class MeshBackgroundService {
           ..write(json.encode({'success': false, 'error': e.toString()}))
           ..close();
       }
-    } else if (path == '/api/clipboard' && request.method == 'POST') {
-      try {
-        final content = await utf8.decoder.bind(request).join();
-        final data = json.decode(content);
-        MeshLogProvider().addLog('Clipboard action synchronized: ${data['text']}');
+    } else if (path == '/api/clipboard') {
+      if (request.method == 'POST') {
+        try {
+          final content = await utf8.decoder.bind(request).join();
+          final data = json.decode(content);
+          final textPayload = (data['clipboard'] ?? data['text'] ?? '').toString();
+
+          if (textPayload.isNotEmpty) {
+            _latestClipboard = textPayload;
+            await Clipboard.setData(ClipboardData(text: textPayload));
+            MeshLogProvider().addLog('Clipboard action synchronized: $textPayload');
+          }
+
+          request.response
+            ..headers.contentType = ContentType.json
+            ..write(json.encode({'success': true, 'clipboard': _latestClipboard, 'received': textPayload}))
+            ..close();
+        } catch (e) {
+          request.response
+            ..statusCode = HttpStatus.badRequest
+            ..write(json.encode({'success': false, 'error': e.toString()}))
+            ..close();
+        }
+      } else {
+        // GET request to serve current clipboard state to polling clients or web studio
         request.response
           ..headers.contentType = ContentType.json
-          ..write(json.encode({'success': true, 'received': data['text']}))
-          ..close();
-      } catch (e) {
-        request.response
-          ..statusCode = HttpStatus.badRequest
-          ..write(json.encode({'success': false, 'error': e.toString()}))
+          ..write(json.encode({'status': 'success', 'clipboard': _latestClipboard}))
           ..close();
       }
     } else if (path == '/api/notify' && request.method == 'POST') {
