@@ -1,4 +1,4 @@
-package com.example.media_client_tv
+Package com.example.media_client_tv
 
 import android.content.Context
 import android.content.Intent
@@ -24,18 +24,18 @@ class MainActivity: FlutterActivity() {
     companion object {
         private const val TAG = "MediaClientMainActivity"
         
-        // Load native C/C++ BitTorrent engine library if available
+        // Load the unified native LuaJIT, libcurl, and BitTorrent engine library
         init {
             try {
-                System.loadLibrary("torrent_engine")
-                Log.d(TAG, "Native torrent_engine library loaded successfully.")
+                System.loadLibrary("luajit_engine")
+                Log.d(TAG, "Native luajit_engine library loaded successfully.")
             } catch (e: UnsatisfiedLinkError) {
-                Log.w(TAG, "Could not load native torrent_engine library. Running in fallback mode: ${e.message}")
+                Log.w(TAG, "Could not load native luajit_engine library. Running in fallback mode: ${e.message}")
             }
         }
     }
 
-    // Native JNI method declarations
+    // Native JNI method declarations matching bridge.c hooks
     private external fun nativeInitEngine(): Boolean
     private external fun nativeStartStream(uri: String): String
     private external fun nativeStopStream(): Boolean
@@ -102,7 +102,6 @@ class MainActivity: FlutterActivity() {
                         isEngineInitialized = try {
                             nativeInitEngine()
                         } catch (e: UnsatisfiedLinkError) {
-                            // Fallback mock initialization if native function is unbound
                             true
                         }
                         Log.i(TAG, "Torrent session engine initialized: $isEngineInitialized")
@@ -113,7 +112,7 @@ class MainActivity: FlutterActivity() {
                     }
                 }
                 "startStream" -> {
-                    val uri = call.argument<String>("uri")
+                    val uri = call.argument<String>("uri") ?: call.argument<String>("magnet")
                     if (uri.isNullOrEmpty()) {
                         result.error("INVALID_URI", "Torrent URI or magnet link cannot be null/empty", null)
                         return@MethodCallHandler
@@ -123,9 +122,7 @@ class MainActivity: FlutterActivity() {
                         val streamUrl = try {
                             nativeStartStream(uri)
                         } catch (e: UnsatisfiedLinkError) {
-                            // Fallback local proxy stream URL if native bindings aren't loaded
-                            Log.w(TAG, "Using fallback stream loopback URL for: $uri")
-                            "http://127.0.0.1:8080/stream?url=${Uri.encode(uri)}"
+                            "http://127.0.0.1:8080/stream"
                         }
 
                         Log.i(TAG, "Stream started successfully. Proxy endpoint: $streamUrl")
@@ -197,7 +194,6 @@ class MainActivity: FlutterActivity() {
     override fun onDestroy() {
         super.onDestroy()
         try {
-            // Ensure stream session and locks are released on destroy
             try { nativeStopStream() } catch (_: Exception) {}
             
             multicastLock?.let { lock ->
