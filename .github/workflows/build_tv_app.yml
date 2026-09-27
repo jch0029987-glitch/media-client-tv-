@@ -164,6 +164,7 @@ jobs:
           NDK_PATH=$(find $ANDROID_SDK_ROOT/ndk -maxdepth 1 -mindepth 1 | sort -V | tail -n 1)
           TOOLCHAIN="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin"
           TARGET_CC="$TOOLCHAIN/clang --target=armv7a-linux-androideabi21"
+          TARGET_CXX="$TOOLCHAIN/clang++ --target=armv7a-linux-androideabi21"
 
           echo "Compiling LuaJIT for Android target..."
           cd LuaJIT
@@ -182,9 +183,10 @@ jobs:
           $TARGET_CC -fPIC -O3 -c strbuf.c fpconv.c lua_cjson.c -I../LuaJIT/src
           cd "$WORKSPACE_ROOT"
 
-          echo "Compiling bridge.c as pure C with thread_local mapping..."
-          $TARGET_CC -fPIC -O3 -c android/app/src/main/cpp/bridge.c \
+          echo "Compiling bridge.cpp as C++ with thread_local mapping..."
+          $TARGET_CXX -fPIC -O3 -c android/app/src/main/cpp/bridge.cpp \
             -o android/app/src/main/cpp/bridge.o \
+            -std=c++20 \
             -Dthread_local=_Thread_local \
             -Icurl/dist/include \
             -Iopenssl_dist/include \
