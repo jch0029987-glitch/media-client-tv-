@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <pthread.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -28,7 +29,6 @@ extern "C" {
     int tori_init_session_ex(const char* magnet_uri, const char* cache_dir, int max_cache_mb);
     void tori_stop_session(void);
     const char* tori_get_stats_json(void);
-    int tori_read_block(long long offset, char* buffer, size_t length);
 #ifdef __cplusplus
 }
 #endif
@@ -262,25 +262,29 @@ static void* stream_server_worker(void* arg) {
 
         write(new_socket, header_buf, header_len);
 
-        // Allocate a read buffer for real torrent block chunks
+        // Stream real bytes from the downloaded cache file using pread
         size_t block_size = 32768;
         char *piece_buffer = malloc(block_size);
         
         if (piece_buffer) {
-            long long current_offset = range_start;
-            int total_transferred = 0;
-            int max_transfer = 1048576; // Stream 1MB per chunk request
+            int media_fd = open("/data/local/tmp/downloaded_media.mp4", O_RDONLY);
+            if (media_fd >= 0) {
+                long long current_offset = range_start;
+                int total_transferred = 0;
+                int max_transfer = 1048576; // Stream 1MB per chunk request
 
-            while (total_transferred < max_transfer && g_server_running) {
-                int bytes_read = tori_read_block(current_offset, piece_buffer, block_size);
-                if (bytes_read > 0) {
-                    if (write(new_socket, piece_buffer, bytes_read) <= 0) break;
-                    current_offset += bytes_read;
-                    total_transferred += bytes_read;
-                } else {
-                    // If the peer network hasn't downloaded this piece yet, sleep briefly and retry
-                    usleep(50000); // 50ms pause
+                while (total_transferred < max_transfer && g_server_running) {
+                    ssize_t bytes_read = pread(media_fd, piece_buffer, block_size, current_offset);
+                    if (bytes_read > 0) {
+                        if (write(new_socket, piece_buffer, bytes_read) <= 0) break;
+                        current_offset += bytes_read;
+                        total_transferred += bytes_read;
+                    } else {
+                        // If the piece hasn't been downloaded to disk yet, sleep briefly and retry
+                        usleep(50000); // 50ms pause
+                    }
                 }
+                close(media_fd);
             }
             free(piece_buffer);
         }
