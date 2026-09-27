@@ -1,4 +1,4 @@
-Package com.example.media_client_tv
+package com.example.media_client_tv
 
 import android.content.Context
 import android.content.Intent
