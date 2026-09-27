@@ -210,7 +210,7 @@ jobs:
             openssl_dist/lib/libcrypto.a \
             -latomic \
             -Wl,--end-group \
-            -llog -lz -lm -ldl -lpthread
+            -llog -lz -lm -ldl
 
           ls -lh android/app/src/main/jniLibs/armeabi-v7a/libluajit_engine.so
 
