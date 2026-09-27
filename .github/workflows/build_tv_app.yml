@@ -195,19 +195,19 @@ jobs:
           echo "Preparing jniLibs output directory..."
           mkdir -p android/app/src/main/jniLibs/armeabi-v7a
 
-          echo "Compiling unified native libluajit_engine.so with libcurl, LuaJIT, CJSON, and BitTorrent Engine..."
+          echo "Compiling unified native libluajit_engine.so statically with LuaJIT, libcurl, CJSON, and BitTorrent Engine..."
           $TOOLCHAIN/clang++ --target=armv7a-linux-androideabi21 -shared -fPIC \
             -std=c++20 -Dthread_local=_Thread_local \
             android/app/src/main/cpp/bridge.o \
             lua-cjson/strbuf.o lua-cjson/fpconv.o lua-cjson/lua_cjson.o \
             -o android/app/src/main/jniLibs/armeabi-v7a/libluajit_engine.so \
             -Wl,--start-group \
+            LuaJIT/src/libluajit.a \
             bittorrent_engine/build/Source/libtori/libtori.a \
             curl/dist/lib/libcurl.a \
             openssl_dist/lib/libssl.a \
             openssl_dist/lib/libcrypto.a \
             -Wl,--end-group \
-            -LLuaJIT/src -lluajit \
             -llog -lz -lm -latomic -lc++
 
           ls -lh android/app/src/main/jniLibs/armeabi-v7a/libluajit_engine.so
@@ -253,7 +253,7 @@ jobs:
         run: |
           TAG_NAME="v1.0.0-${{ github.run_number }}"
           RELEASE_TITLE="Media Client TV v1.0.0-${{ github.run_number }}"
-          RELEASE_NOTES="Automated signed release build for Android TV (Chromecast HD optimized 32-bit armeabi-v7a with LuaJIT, libcurl HTTPS, CJSON, and integrated native BitTorrent engine)."
+          RELEASE_NOTES="Automated signed release build for Android TV (Chromecast HD optimized 32-bit armeabi-v7a with statically linked LuaJIT, libcurl HTTPS, CJSON, and integrated native BitTorrent engine)."
           
           APK_PATH=$(find build/app/outputs/flutter-apk/ -name "app-release.apk" -o -name "*.apk" | head -n 1)
           
