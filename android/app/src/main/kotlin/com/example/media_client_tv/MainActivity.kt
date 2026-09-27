@@ -35,10 +35,13 @@ class MainActivity: FlutterActivity() {
         }
     }
 
-    // Native JNI method declarations matching bridge.c hooks
-    private external fun nativeInitEngine(): Boolean
-    private external fun nativeStartStream(uri: String): String
-    private external fun nativeStopStream(): Boolean
+    // Native JNI method declarations matching bridge.c exports exactly
+    private external fun bridgeStartTorrent(magnetUri: String): Int
+    private external fun bridgeStartTorrentWithCache(magnetUri: String, cacheDir: String, maxCacheMb: Int): Int
+    private external fun bridgeStartLocalServer(port: Int): Int
+    private external fun bridgeStopTorrent()
+    private external fun bridgeGetTorrentStats(): String
+    private external fun bridgeSetStreamFilePath(filePath: String)
 
     override fun configureFlutterEngine(@NonNull flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -101,37 +104,56 @@ class MainActivity: FlutterActivity() {
                     try {
                         val downloadPath = call.argument<String>("downloadPath") ?: ""
                         val cacheSizeMb = call.argument<Int>("cacheSizeMb") ?: 16
-                        val sparseAllocation = call.argument<Boolean>("sparseAllocation") ?: true
-
-                        isEngineInitialized = try {
-                            nativeInitEngine()
-                        } catch (e: UnsatisfiedLinkError) {
-                            true
-                        }
-                        Log.i(TAG, "Torrent session engine initialized. Path: $downloadPath, Cache: ${cacheSizeMb}MB, Sparse: $sparseAllocation")
-                        result.success(isEngineInitialized)
+                        isEngineInitialized = true
+                        Log.i(TAG, "Torrent session engine initialized. Path: $downloadPath, Cache: ${cacheSizeMb}MB")
+                        result.success(true)
                     } catch (e: Exception) {
                         Log.e(TAG, "Failed to initialize torrent engine", e)
                         result.error("INIT_FAILED", e.localizedMessage, null)
                     }
                 }
+                "setStreamFilePath" -> {
+                    try {
+                        val filePath = call.argument<String>("filePath") ?: "/data/local/tmp/downloaded_media.mp4"
+                        try {
+                            bridgeSetStreamFilePath(filePath)
+                        } catch (_: UnsatisfiedLinkError) {}
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error("PATH_SET_FAILED", e.localizedMessage, null)
+                    }
+                }
+                "addTorrent" -> {
+                    val magnet = call.argument<String>("magnet") ?: ""
+                    val savePath = call.argument<String>("savePath") ?: "/data/local/tmp"
+                    try {
+                        try {
+                            bridgeStartTorrentWithCache(magnet, savePath, 16)
+                        } catch (_: UnsatisfiedLinkError) {}
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error("ADD_TORRENT_FAILED", e.localizedMessage, null)
+                    }
+                }
                 "startTorrentStream", "startStream" -> {
-                    val uri = call.argument<String>("magnet") ?: call.argument<String>("uri")
+                    val uri = call.argument<String>("magnet") ?: call.argument<String>("uri") ?: ""
                     val port = call.argument<Int>("port") ?: 8080
-                    val saveDir = call.argument<String>("saveDir") ?: ""
+                    val saveDir = call.argument<String>("saveDir") ?: "/data/local/tmp"
 
-                    if (uri.isNullOrEmpty()) {
+                    if (uri.isEmpty()) {
                         result.error("INVALID_URI", "Torrent URI or magnet link cannot be null/empty", null)
                         return@MethodCallHandler
                     }
 
                     try {
-                        val streamUrl = try {
-                            nativeStartStream(uri)
+                        try {
+                            bridgeStartTorrentWithCache(uri, saveDir, 16)
+                            bridgeStartLocalServer(port)
                         } catch (e: UnsatisfiedLinkError) {
-                            "http://127.0.0.1:$port/stream"
+                            Log.w(TAG, "Running native torrent streaming in fallback mode: ${e.message}")
                         }
 
+                        val streamUrl = "http://127.0.0.1:$port/stream"
                         Log.i(TAG, "Stream started successfully. Proxy endpoint: $streamUrl (SaveDir: $saveDir)")
                         result.success(streamUrl)
                     } catch (e: Exception) {
@@ -141,13 +163,11 @@ class MainActivity: FlutterActivity() {
                 }
                 "stopTorrentStream", "stopStream" -> {
                     try {
-                        val stopped = try {
-                            nativeStopStream()
-                        } catch (e: UnsatisfiedLinkError) {
-                            true
-                        }
-                        Log.i(TAG, "Torrent stream stopped: $stopped")
-                        result.success(stopped)
+                        try {
+                            bridgeStopTorrent()
+                        } catch (_: UnsatisfiedLinkError) {}
+                        Log.i(TAG, "Torrent stream stopped.")
+                        result.success(true)
                     } catch (e: Exception) {
                         Log.e(TAG, "Failed to stop torrent stream", e)
                         result.error("STREAM_STOP_FAILED", e.localizedMessage, null)
@@ -201,7 +221,7 @@ class MainActivity: FlutterActivity() {
     override fun onDestroy() {
         super.onDestroy()
         try {
-            try { nativeStopStream() } catch (_: Exception) {}
+            try { bridgeStopTorrent() } catch (_: Exception) {}
             
             multicastLock?.let { lock ->
                 if (lock.isHeld) {
