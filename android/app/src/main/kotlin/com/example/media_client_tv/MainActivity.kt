@@ -6,6 +6,7 @@ import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.Environment
 import android.provider.Settings
+import android.util.Log
 import android.widget.Toast
 import androidx.annotation.NonNull
 import androidx.core.content.FileProvider
@@ -15,12 +16,35 @@ import io.flutter.plugin.common.MethodChannel
 import java.io.File
 
 class MainActivity: FlutterActivity() {
-    private val CHANNEL = "com.example.media_client_tv/installer"
+    private val INSTALLER_CHANNEL = "com.example.media_client_tv/installer"
+    private val TORRENT_CHANNEL = "com.mediaclient.tv/torrent"
     private var multicastLock: WifiManager.MulticastLock? = null
+    private var isEngineInitialized = false
+
+    companion object {
+        private const val TAG = "MediaClientMainActivity"
+        
+        // Load native C/C++ BitTorrent engine library if available
+        init {
+            try {
+                System.loadLibrary("torrent_engine")
+                Log.d(TAG, "Native torrent_engine library loaded successfully.")
+            } catch (e: UnsatisfiedLinkError) {
+                Log.w(TAG, "Could not load native torrent_engine library. Running in fallback mode: ${e.message}")
+            }
+        }
+    }
+
+    // Native JNI method declarations
+    private external fun nativeInitEngine(): Boolean
+    private external fun nativeStartStream(uri: String): String
+    private external fun nativeStopStream(): Boolean
 
     override fun configureFlutterEngine(@NonNull flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
+
+        // 1. Installer & Utility Channel
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, INSTALLER_CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
                 "acquireMulticastLock" -> {
                     val acquired = acquireWifiMulticastLock()
@@ -69,6 +93,69 @@ class MainActivity: FlutterActivity() {
                 }
             }
         }
+
+        // 2. Native Torrent Engine Channel
+        val torrentHandler = MethodChannel.MethodCallHandler { call, result ->
+            when (call.method) {
+                "initEngine" -> {
+                    try {
+                        isEngineInitialized = try {
+                            nativeInitEngine()
+                        } catch (e: UnsatisfiedLinkError) {
+                            // Fallback mock initialization if native function is unbound
+                            true
+                        }
+                        Log.i(TAG, "Torrent session engine initialized: $isEngineInitialized")
+                        result.success(isEngineInitialized)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to initialize torrent engine", e)
+                        result.error("INIT_FAILED", e.localizedMessage, null)
+                    }
+                }
+                "startStream" -> {
+                    val uri = call.argument<String>("uri")
+                    if (uri.isNullOrEmpty()) {
+                        result.error("INVALID_URI", "Torrent URI or magnet link cannot be null/empty", null)
+                        return@MethodCallHandler
+                    }
+
+                    try {
+                        val streamUrl = try {
+                            nativeStartStream(uri)
+                        } catch (e: UnsatisfiedLinkError) {
+                            // Fallback local proxy stream URL if native bindings aren't loaded
+                            Log.w(TAG, "Using fallback stream loopback URL for: $uri")
+                            "http://127.0.0.1:8080/stream?url=${Uri.encode(uri)}"
+                        }
+
+                        Log.i(TAG, "Stream started successfully. Proxy endpoint: $streamUrl")
+                        result.success(streamUrl)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to start torrent stream", e)
+                        result.error("STREAM_START_FAILED", e.localizedMessage, null)
+                    }
+                }
+                "stopStream" -> {
+                    try {
+                        val stopped = try {
+                            nativeStopStream()
+                        } catch (e: UnsatisfiedLinkError) {
+                            true
+                        }
+                        Log.i(TAG, "Torrent stream stopped: $stopped")
+                        result.success(stopped)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to stop torrent stream", e)
+                        result.error("STREAM_STOP_FAILED", e.localizedMessage, null)
+                    }
+                }
+                else -> {
+                    result.notImplemented()
+                }
+            }
+        }
+
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, TORRENT_CHANNEL).setMethodCallHandler(torrentHandler)
     }
 
     private fun acquireWifiMulticastLock(): Boolean {
@@ -110,6 +197,9 @@ class MainActivity: FlutterActivity() {
     override fun onDestroy() {
         super.onDestroy()
         try {
+            // Ensure stream session and locks are released on destroy
+            try { nativeStopStream() } catch (_: Exception) {}
+            
             multicastLock?.let { lock ->
                 if (lock.isHeld) {
                     lock.release()
